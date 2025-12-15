@@ -1,0 +1,5 @@
+Container
+VST3i: Current (Minimal)
+VST3: Pro-Q 4 (FabFilter)
+VST3: bloom (oeksound)
+VST3: Pro-C 2 (FabFilter)
