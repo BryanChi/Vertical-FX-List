@@ -2412,13 +2412,6 @@ function Send_Btn(ctx, Track, t, BtnSize)
           im.Text(ctx, 'ms')
 
           local function createPreDelayFX()
-            -- Preserve container wet/dry and enabled state to avoid side effects
-            local containerEnabled, containerWet
-            if Snd.Container and Snd.Container >= 0 then
-              containerEnabled = r.TrackFX_GetEnabled(Track, Snd.Container)
-              containerWet = r.TrackFX_GetParamNormalized(Track, Snd.Container, 0)
-            end
-
             local insertPos = Calc_Container_FX_Index(Track, Snd.Container, 1)
             local newId = AddFX_HideWindow(Track, 'JS: Dual Time adjustment +/- Delay', insertPos)
             if newId and newId >= 0 then
@@ -2433,19 +2426,9 @@ function Send_Btn(ctx, Track, t, BtnSize)
 
               local normL = MsToNorm(Snd.PreDelay_L)
               local normR = MsToNorm(Snd.PreDelay_R)
-              r.TrackFX_SetParamNormalized(Track, newId, 0, normL)
-              r.TrackFX_SetParamNormalized(Track, newId, 1, normR)
+              --[[ r.TrackFX_SetParamNormalized(Track, newId, 0, normL)
+              r.TrackFX_SetParamNormalized(Track, newId, 1, normR) ]]
               Snd.HasPreDelay = true
-
-              -- Restore container wet/dry and enabled state
-              if Snd.Container and Snd.Container >= 0 then
-                if containerWet ~= nil then
-                  r.TrackFX_SetParamNormalized(Track, Snd.Container, 0, containerWet)
-                end
-                if containerEnabled ~= nil then
-                  r.TrackFX_SetEnabled(Track, Snd.Container, containerEnabled)
-                end
-              end
             end
           end
 
@@ -2528,17 +2511,9 @@ function Send_Btn(ctx, Track, t, BtnSize)
                 Snd.HasPreDelay = true
               end
             end
+
           end
 
-          -- Restore container wet/dry and enabled state if we created the JSFX
-          if createdPreDelayFX and Snd.Container and Snd.Container >= 0 then
-            if containerWetBefore ~= nil then
-              r.TrackFX_SetParamNormalized(Track, Snd.Container, 0, containerWetBefore)
-            end
-            if containerEnabledBefore ~= nil then
-              r.TrackFX_SetEnabled(Track, Snd.Container, containerEnabledBefore)
-            end
-          end
         end
         local function AddFX()
           im.Text(ctx, 'Add FX :     ')
