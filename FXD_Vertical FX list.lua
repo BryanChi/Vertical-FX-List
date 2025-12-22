@@ -2749,9 +2749,57 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
       -- Check if popup was already opened before (to determine if we should use stored position)
       local popup_was_open = (FX_Search_WindowPos ~= nil)
       
+      -- Detect if we're inside a SendFX popup and adjust position to avoid overlap
+      local is_in_sendfx_popup = false
+      local sendfx_popup_x, sendfx_popup_y, sendfx_popup_w, sendfx_popup_h = nil, nil, nil, nil
+      
+      -- Check if we're in a SendFX popup by checking if showFavorites is false
+      -- When FilterBox is called from SendFX popup, showFavorites is false
+      if not showFavorites then
+          -- Get current window position and size (this will be the SendFX popup window)
+          local current_win_x, current_win_y = im.GetWindowPos(ctx)
+          local current_win_w, current_win_h = im.GetWindowSize(ctx)
+          
+          -- If we have valid window dimensions, we're likely in a popup (SendFX popup)
+          -- Position search results to the right of the SendFX popup to avoid overlap
+          if current_win_x and current_win_y and current_win_w and current_win_h then
+              is_in_sendfx_popup = true
+              sendfx_popup_x = current_win_x
+              sendfx_popup_y = current_win_y
+              sendfx_popup_w = current_win_w
+              sendfx_popup_h = current_win_h
+          end
+      end
+      
       if not popup_was_open then
           -- First time opening - use calculated position
-          FX_Search_WindowPos = {x = x, y = y - filter_h / 2}
+          if is_in_sendfx_popup and sendfx_popup_x and sendfx_popup_w then
+              -- Position search results popup to the right of SendFX popup with a small gap
+              local gap = 10
+              local search_popup_x = sendfx_popup_x + sendfx_popup_w + gap
+              local search_popup_y = sendfx_popup_y
+              
+              -- Check viewport bounds to ensure popup doesn't go off-screen
+              -- If there's not enough space to the right, position it to the left instead
+              if VP and VP.X and VP.w then
+                  local search_popup_w = FX_Search_WindowSize.w or 528
+                  if search_popup_x + search_popup_w > VP.X + VP.w then
+                      -- Not enough space to the right, position to the left of SendFX popup
+                      search_popup_x = sendfx_popup_x - search_popup_w - gap
+                      -- Ensure it doesn't go off the left edge either
+                      if search_popup_x < VP.X then
+                          -- Fall back to positioning below the SendFX popup
+                          search_popup_x = sendfx_popup_x
+                          search_popup_y = sendfx_popup_y + sendfx_popup_h + gap
+                      end
+                  end
+              end
+              
+              FX_Search_WindowPos = {x = search_popup_x, y = search_popup_y}
+          else
+              -- Normal positioning
+              FX_Search_WindowPos = {x = x, y = y - filter_h / 2}
+          end
       end
       
       -- Always use stored position and size to prevent resizing
@@ -6951,6 +6999,20 @@ function loop()
 
 
       r.Undo_EndBlock(undoLabel, -1)
+      
+      -- Restore container parallel states that were preserved during drop into containers
+      if PreserveContainerParallel then
+        for track, containers in pairs(PreserveContainerParallel) do
+          for containerIdx, parVal in pairs(containers) do
+            -- Restore parallel state (including 0 for first container in parallel group)
+            if parVal ~= nil then
+              r.TrackFX_SetNamedConfigParm(track, containerIdx, 'parallel', tostring(parVal))
+            end
+          end
+        end
+        PreserveContainerParallel = nil
+      end
+      
       MovFX = { FromPos = {}, ToPos = {}, Lbl = {}, Copy = {}, FromTrack = {}, ToTrack = {} }
       NeedCopyFX = nil
       DropPos = nil

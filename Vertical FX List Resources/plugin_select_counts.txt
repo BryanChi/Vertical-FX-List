@@ -1,24 +1,25 @@
-VST3: Pro-Q 4 (FabFilter)	30
-VST3: Pro-C 2 (FabFilter)	20
-Container	14
+VST3: Pro-Q 4 (FabFilter)	48
+VST3: Pro-C 2 (FabFilter)	29
+Container	16
 VST3: Pro-L 2 (FabFilter)	8
-JS: De-esser [Liteon/deesser]	6
-VST3: Pro-R 2 (FabFilter)	6
+VST3: Pro-R 2 (FabFilter)	8
+JS: De-esser [Liteon/deesser]	7
+VST3: Timeless 3 (FabFilter)	6
+VST3: Fabfilter Pro R	5
 VST3i: Current (Minimal)	5
 VST3: FabFilter Pro-Q 2 (FabFilter)	4
-VST3: Fabfilter Pro R	4
-VST3: Timeless 3 (FabFilter)	4
+VST3: bloom (oeksound)	3
 VST3: kHs Gain (Kilohearts)	3
+VST: ValhallaDelay (Valhalla DSP, LLC)	3
 AUi: MSoundFactory6out (MeldaProduction)	2
 VST3: Abbey Road Reel ADT Live Mono (Waves)	2
 VST3: MDynamicsMB (MeldaProduction)	2
 VST3: ValhallaFreqEcho (Valhalla DSP, LLC)	2
 VST3: ValhallaSupermassive (Valhalla DSP, LLC)	2
-VST3: bloom (oeksound)	2
 VST3: kHs Phaser (Kilohearts)	2
+VST3: kHs Reverb (Kilohearts)	2
 VST3i: Omnisphere (Spectrasonics) (18 out)	2
 VST: MDynamicsMBLarge (MeldaProduction)	2
-VST: ValhallaDelay (Valhalla DSP, LLC)	2
 AU: ValhallaSpaceModulator (Valhalla DSP, LLC)	1
 AUi: Vital (Vital Audio)	1
 VST3: Abbey Road Reel ADT Mono/Stereo (Waves)	1
@@ -36,7 +37,6 @@ VST3: ValhallaVintageVerb (Valhalla DSP, LLC)	1
 VST3: Volcano 3 (FabFilter)	1
 VST3: kHs Compressor (Kilohearts)	1
 VST3: kHs Haas (Kilohearts)	1
-VST3: kHs Reverb (Kilohearts)	1
 VST3i: ADSR Sample Manager (ADSR)	1
 VST3i: Kontakt 8 (Native Instruments) (64 out)	1
 VST3i: MDrummer (MeldaProduction) (32 out)	1

@@ -391,6 +391,10 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           end
 
           if dropped and draggedFXIdxNum then
+            -- Preserve container's parallel state before drop
+            local _, containerParStr = r.TrackFX_GetNamedConfigParm(Track, fx, 'parallel')
+            local containerParVal = tonumber(containerParStr or '0') or 0
+            
             -- Compute destination inside the container: append to end
             local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, fx, 'container_count')
             local curCnt = tonumber(cntStr) or 0
@@ -406,6 +410,11 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                 NeedLinkFXsID = ID
                 FX = FX or {}
                 FX[ID] = FX[ID] or {}
+              end
+              
+              -- Restore container's parallel state after drop to preserve parallel container relationships
+              if containerParVal > 0 then
+                r.TrackFX_SetNamedConfigParm(Track, fx, 'parallel', tostring(containerParVal))
               end
             end
           end
@@ -1830,39 +1839,187 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
               local blockStart = asc[1] and asc[1].orig or 0
               local blockLen = #asc
               local insertionStart
-              if sameTrack and not cmdHeld then
-                -- Moving on same track: adjust insertion point to account for block
-                if fx >= blockStart then
-                  insertionStart = fx - (blockLen - 1)
+              
+              -- If dropping into a container, calculate the container insertion index
+              if container then
+                -- Find the slot position (0-based) of fx within the container
+                local slotPos = nil
+                local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')
+                local curCnt = tonumber(cntStr) or 0
+                for i = 0, curCnt - 1 do
+                  local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+                  if childIdx == fx then
+                    slotPos = i
+                    break
+                  end
+                end
+                
+                if slotPos ~= nil then
+                  -- Calculate insertion start slot position
+                  -- When dropping onto slot i (0-based), we want to insert before it, which is position i+1 (1-based)
+                  -- But if moving on same track and dragging down, we need to account for the block being moved
+                  local isSameContainerMove = false
+                  if sameTrack and not cmdHeld then
+                    -- Moving on same track: check if dragged FX is also in the same container
+                    local draggedSlotPos = nil
+                    for i = 0, curCnt - 1 do
+                      local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+                      if childIdx == draggedOrig then
+                        draggedSlotPos = i
+                        isSameContainerMove = true
+                        break
+                      end
+                    end
+                    if isSameContainerMove and slotPos >= draggedSlotPos then
+                      -- Moving down within same container: adjust for block length
+                      insertionStart = slotPos - (blockLen - 1)
+                    else
+                      -- Moving up or not same container: insert at target position
+                      insertionStart = slotPos
+                    end
+                  else
+                    -- Copying or different track: insert at drop position (before the target slot)
+                    insertionStart = slotPos
+                  end
+                  if insertionStart < 0 then insertionStart = 0 end
+                  
+                  -- Convert slot positions to container insertion indices
+                  for _, it in ipairs(pairsList) do
+                    local rank = rankOf[it.guid] or 0
+                    local fromIndex
+                    if cmdHeld then
+                      -- When copying, use original index (no compaction)
+                      fromIndex = it.orig
+                    else
+                      -- When moving, use contiguous index after compaction
+                      fromIndex = blockStart + rank
+                    end
+                    local targetSlot = insertionStart + rank
+                    -- Convert slot position (0-based) to container insertion index (1-based for Calc_Container_FX_Index)
+                    -- When moving within the same container, use slotPos + 1 because slot positions are already adjusted
+                    -- When copying or moving from outside, use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
+                    local insertPosInside = isSameContainerMove and (targetSlot + 1) or (targetSlot + 2)
+                    local target = Calc_Container_FX_Index and Calc_Container_FX_Index(Track, container, insertPosInside) or targetSlot
+                    table.insert(MovFX.FromPos, fromIndex)
+                    table.insert(MovFX.ToPos, target)
+                    table.insert(MovFX.FromTrack, DraggingTrack_Data)
+                    table.insert(MovFX.ToTrack, Track)
+                    table.insert(MovFX.GUID, it.guid)
+                  end
                 else
-                  insertionStart = fx
+                  -- Fallback: couldn't find slot position, use fx as-is
+                  if sameTrack and not cmdHeld then
+                    if fx >= blockStart then
+                      insertionStart = fx - (blockLen - 1)
+                    else
+                      insertionStart = fx
+                    end
+                  else
+                    insertionStart = fx
+                  end
+                  if insertionStart < 0 then insertionStart = 0 end
+                  for _, it in ipairs(pairsList) do
+                    local rank = rankOf[it.guid] or 0
+                    local fromIndex
+                    if cmdHeld then
+                      fromIndex = it.orig
+                    else
+                      fromIndex = blockStart + rank
+                    end
+                    local target = insertionStart + rank
+                    table.insert(MovFX.FromPos, fromIndex)
+                    table.insert(MovFX.ToPos, target)
+                    table.insert(MovFX.FromTrack, DraggingTrack_Data)
+                    table.insert(MovFX.ToTrack, Track)
+                    table.insert(MovFX.GUID, it.guid)
+                  end
                 end
               else
-                -- Copying or different track: insert at drop position
-                insertionStart = fx
-              end
-              if insertionStart < 0 then insertionStart = 0 end
-              for _, it in ipairs(pairsList) do
-                local rank = rankOf[it.guid] or 0
-                local fromIndex
-                if cmdHeld then
-                  -- When copying, use original index (no compaction)
-                  fromIndex = it.orig
+                -- Not in a container: use regular track FX logic
+                if sameTrack and not cmdHeld then
+                  -- Moving on same track: adjust insertion point to account for block
+                  if fx >= blockStart then
+                    insertionStart = fx - (blockLen - 1)
+                  else
+                    insertionStart = fx
+                  end
                 else
-                  -- When moving, use contiguous index after compaction
-                  fromIndex = blockStart + rank
+                  -- Copying or different track: insert at drop position
+                  insertionStart = fx
                 end
-                local target = insertionStart + rank
-                table.insert(MovFX.FromPos, fromIndex)
-                table.insert(MovFX.ToPos, target)
-                table.insert(MovFX.FromTrack, DraggingTrack_Data)
-                table.insert(MovFX.ToTrack, Track)
-                table.insert(MovFX.GUID, it.guid)
+                if insertionStart < 0 then insertionStart = 0 end
+                for _, it in ipairs(pairsList) do
+                  local rank = rankOf[it.guid] or 0
+                  local fromIndex
+                  if cmdHeld then
+                    -- When copying, use original index (no compaction)
+                    fromIndex = it.orig
+                  else
+                    -- When moving, use contiguous index after compaction
+                    fromIndex = blockStart + rank
+                  end
+                  local target = insertionStart + rank
+                  table.insert(MovFX.FromPos, fromIndex)
+                  table.insert(MovFX.ToPos, target)
+                  table.insert(MovFX.FromTrack, DraggingTrack_Data)
+                  table.insert(MovFX.ToTrack, Track)
+                  table.insert(MovFX.GUID, it.guid)
+                end
               end
             end
             didBatch = #pairsList > 0
           end  -- Close if #pairsList > 0
         end  -- Close if draggedOrig ~= nil
+        
+        -- If dropping into a container (fx is a child inside container), preserve container's parallel state
+        -- Check if container is part of a parallel group (even if it's the first container with parallel=0)
+        -- Need to check at top level, not inside container context
+        local containerParallelPeers = nil
+        local containerParVal = nil
+        if container then
+          -- Build top-level FX list to check for parallel containers
+          local topLevelList = {}
+          local topLevelCnt = r.TrackFX_GetCount(Track)
+          for i = 0, topLevelCnt - 1 do
+            topLevelList[#topLevelList + 1] = i
+          end
+          -- Find container in top-level list
+          local containerIdx = nil
+          for i = 1, #topLevelList do
+            if topLevelList[i] == container then
+              containerIdx = i
+              break
+            end
+          end
+          -- Get parallel group peers at top level
+          if containerIdx then
+            local start_i = containerIdx
+            while start_i > 1 do
+              local _, pv = r.TrackFX_GetNamedConfigParm(Track, topLevelList[start_i], 'parallel')
+              if tonumber(pv or '0') and tonumber(pv or '0') > 0 then
+                start_i = start_i - 1
+              else
+                break
+              end
+            end
+            local end_i = containerIdx
+            while end_i + 1 <= #topLevelList do
+              local _, nv = r.TrackFX_GetNamedConfigParm(Track, topLevelList[end_i + 1], 'parallel')
+              if tonumber(nv or '0') and tonumber(nv or '0') > 0 then
+                end_i = end_i + 1
+              else
+                break
+              end
+            end
+            containerParallelPeers = {}
+            for i = start_i, end_i do
+              containerParallelPeers[#containerParallelPeers + 1] = topLevelList[i]
+            end
+          end
+          local _, containerParStr = r.TrackFX_GetNamedConfigParm(Track, container, 'parallel')
+          containerParVal = tonumber(containerParStr or '0') or 0
+        end
+        
         -- Decide desired parallel state based on the drop target
         local _, tgtParStr = r.TrackFX_GetNamedConfigParm(Track, fx, 'parallel')
         local tgtParVal = tonumber(tgtParStr or '0') or 0
@@ -1879,15 +2036,85 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         end
 
         if not didBatch then
+          -- If dropping into a container, calculate the container insertion index
+          local targetIndex = fx
+          local sameTrackSingle = (DraggingTrack_Data == Track)
+          if container then
+            -- Find the slot position (0-based) of fx within the container
+            local slotPos = nil
+            local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')
+            local curCnt = tonumber(cntStr) or 0
+            for i = 0, curCnt - 1 do
+              local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+              if childIdx == fx then
+                slotPos = i
+                break
+              end
+            end
+            
+            if slotPos ~= nil and Calc_Container_FX_Index then
+              -- Check if dragged FX is also in the same container (same-container move)
+              local isSameContainerMove = false
+              if sameTrackSingle then
+                for i = 0, curCnt - 1 do
+                  local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+                  if childIdx == draggedFX then
+                    isSameContainerMove = true
+                    break
+                  end
+                end
+              end
+              
+              -- Convert slot position (0-based) to container insertion index (1-based for Calc_Container_FX_Index)
+              -- When moving within the same container, use slotPos + 1 because slot positions are already correct
+              -- When copying or moving from outside, use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
+              local insertPosInside = isSameContainerMove and (slotPos + 1) or (slotPos + 2)
+              targetIndex = Calc_Container_FX_Index(Track, container, insertPosInside)
+            end
+          end
+          
           if Mods == 0 then
-            MoveFX(draggedFX, fx, true, nil, DraggingTrack_Data, Track)
+            -- Check if targetIndex is a container insertion index (>= 0x2000000)
+            if container and targetIndex and targetIndex >= 0x2000000 then
+              -- Use TrackFX_CopyToTrack directly for container insertion
+              r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, true)
+            else
+              MoveFX(draggedFX, targetIndex, true, nil, DraggingTrack_Data, Track)
+            end
           elseif Mods == Super then
-            MoveFX(draggedFX, fx, false, nil, DraggingTrack_Data, Track)
+            if container and targetIndex and targetIndex >= 0x2000000 then
+              r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
+            else
+              MoveFX(draggedFX, targetIndex, false, nil, DraggingTrack_Data, Track)
+            end
           elseif Mods == Ctrl then --Pool FX
-            MoveFX(draggedFX, fx, false, nil, DraggingTrack_Data, Track)
+            if container and targetIndex and targetIndex >= 0x2000000 then
+              r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
+            else
+              MoveFX(draggedFX, targetIndex, false, nil, DraggingTrack_Data, Track)
+            end
             local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
             NeedLinkFXsID = ID
             FX[ID] = FX[ID] or {}
+          end
+          
+          -- Restore container's parallel state after drop to preserve parallel container relationships
+          -- Store it for restoration after MovFX processing (in case MoveFX triggers MovFX processing)
+          -- If container is part of a parallel group, preserve all containers in that group
+          if container and containerParallelPeers and #containerParallelPeers > 1 then
+            PreserveContainerParallel = PreserveContainerParallel or {}
+            PreserveContainerParallel[Track] = PreserveContainerParallel[Track] or {}
+            for _, peerIdx in ipairs(containerParallelPeers) do
+              local _, peerParStr = r.TrackFX_GetNamedConfigParm(Track, peerIdx, 'parallel')
+              local peerParVal = tonumber(peerParStr or '0') or 0
+              -- Store the parallel state of each peer (even if 0 for the first container)
+              PreserveContainerParallel[Track][peerIdx] = peerParVal
+            end
+          elseif container and containerParVal and containerParVal > 0 then
+            -- Fallback: preserve single container if it has parallel state set
+            PreserveContainerParallel = PreserveContainerParallel or {}
+            PreserveContainerParallel[Track] = PreserveContainerParallel[Track] or {}
+            PreserveContainerParallel[Track][container] = containerParVal
           end
         else
           -- Batch prepared. If copying (Cmd/Super or Ctrl), set flags similar to MoveFX behavior
@@ -1909,6 +2136,24 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                 FX[ID] = FX[ID] or {}
               end
             end
+          end
+          
+          -- Store container parallel state for restoration after batch move (will be handled in MovFX processing)
+          -- If container is part of a parallel group, preserve all containers in that group
+          if container and containerParallelPeers and #containerParallelPeers > 1 then
+            PreserveContainerParallel = PreserveContainerParallel or {}
+            PreserveContainerParallel[Track] = PreserveContainerParallel[Track] or {}
+            for _, peerIdx in ipairs(containerParallelPeers) do
+              local _, peerParStr = r.TrackFX_GetNamedConfigParm(Track, peerIdx, 'parallel')
+              local peerParVal = tonumber(peerParStr or '0') or 0
+              -- Store the parallel state of each peer (even if 0 for the first container)
+              PreserveContainerParallel[Track][peerIdx] = peerParVal
+            end
+          elseif container and containerParVal and containerParVal > 0 then
+            -- Fallback: preserve single container if it has parallel state set
+            PreserveContainerParallel = PreserveContainerParallel or {}
+            PreserveContainerParallel[Track] = PreserveContainerParallel[Track] or {}
+            PreserveContainerParallel[Track][container] = containerParVal
           end
         end
       end

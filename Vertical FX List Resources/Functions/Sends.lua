@@ -1422,9 +1422,12 @@ function Send_Btn(ctx, Track, t, BtnSize)
       -- Draw badge on top of the invisible button
       local BadgeX = CurX 
       local BadgeY = CurY + 1
-      im.DrawList_AddRectFilled(WDL, BadgeX, BadgeY, BadgeX + w, BadgeY + h, Clr.ChanBadgeBg)
-      im.DrawList_AddText(WDL, BadgeX, BadgeY, Clr.ChanBadgeText, str)
-      im.DrawList_AddRect(WDL, BadgeX, BadgeY, BadgeX + w, BadgeY + h, Clr.ChanBadgeText)
+      -- Use darker colors if send is disabled
+      local badgeBg = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeBg, 0.5) or Clr.ChanBadgeBg) or Clr.ChanBadgeBg
+      local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
+      im.DrawList_AddRectFilled(WDL, BadgeX, BadgeY, BadgeX + w, BadgeY + h, badgeBg)
+      im.DrawList_AddText(WDL, BadgeX, BadgeY, badgeText, str)
+      im.DrawList_AddRect(WDL, BadgeX, BadgeY, BadgeX + w, BadgeY + h, badgeText)
       BtnSizeOffset = BtnSizeOffset - totalWidth
       SL()
     end
@@ -1944,6 +1947,9 @@ function Send_Btn(ctx, Track, t, BtnSize)
         return
       end
       
+      -- Track if container was previously set (to detect deletion)
+      local hadContainer = (Snd.Container ~= nil)
+      
       -- If Snd.Container is already set, verify it's still valid before searching
       if Snd.Container ~= nil then
         local fxCount = r.TrackFX_GetCount(Track)
@@ -1995,6 +2001,14 @@ function Send_Btn(ctx, Track, t, BtnSize)
         else
           Snd.Container = nil
         end
+        
+        -- If container was previously set but is now missing, reset send channel to 1-2
+        if hadContainer and Snd.Container == nil then
+          -- Reset send source channel to 0 (channels 1-2)
+          if i and i < r.GetTrackNumSends(Track, 0) then
+            r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', 0)
+          end
+        end
       end
     end
 
@@ -2036,9 +2050,12 @@ function Send_Btn(ctx, Track, t, BtnSize)
         badgeH = math.max(0.0001, h * scale)
       end
       local badgeX = CurX - 5  -- Move badge 5px to the left to prevent overlap with volume readout
-      im.DrawList_AddRectFilled(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, Clr.ChanBadgeBg)
-      im.DrawList_AddText(WDL,  badgeX  , CurY ,Clr.ChanBadgeText,str )
-      im.DrawList_AddRect(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, Clr.ChanBadgeText)
+      -- Use darker colors if send is disabled
+      local badgeBg = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeBg, 0.5) or Clr.ChanBadgeBg) or Clr.ChanBadgeBg
+      local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
+      im.DrawList_AddRectFilled(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, badgeBg)
+      im.DrawList_AddText(WDL,  badgeX  , CurY ,badgeText,str )
+      im.DrawList_AddRect(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, badgeText)
       BtnSizeOffset = BtnSizeOffset - w
       SL()
     else
@@ -2233,51 +2250,25 @@ function Send_Btn(ctx, Track, t, BtnSize)
             Snd.PreDelay_Linked = true
           end
 
+          -- Cache container state so we can restore wet/dry and enabled if the JSFX gets added
+          local containerEnabledBefore, containerWetBefore
+          if Snd.Container and Snd.Container >= 0 then
+            containerEnabledBefore = r.TrackFX_GetEnabled(Track, Snd.Container)
+            containerWetBefore = r.TrackFX_GetParamNormalized(Track, Snd.Container, 0)
+          end
+
+          -- Initialize drag state tracking
+          Snd.PreDelay_DragState = Snd.PreDelay_DragState or {}
+          local dragState = Snd.PreDelay_DragState
+          local dragKey = (t or '') .. '_' .. (i or 0)
+          
+          -- Track if controls were being dragged in previous frame
+          local wasLeftDragging = dragState.leftDragging or false
+          local wasRightDragging = dragState.rightDragging or false
+
           local clr
           if not Snd.HasPreDelay then
             clr = getClr(im.Col_TextDisabled)
-          end
-
-          -- Find / cache the JSFX inside the container
-          local id = Check_If_FX_Exist_In_Container(Track, Snd.Container, 'JS: Dual Time adjustment +/- Delay')
-          if not id then
-            -- No JSFX yet; show disabled controls, allow double-click to create
-            Snd.predelay_id = nil
-            Snd.PreDelay_Init = nil
-          else
-            Snd.predelay_id = id
-
-            -- One-time init of state from current FX parameters
-            if not Snd.PreDelay_Init then
-              -- Left / right delays (params 0 and 1)
-              local pL = r.TrackFX_GetParamNormalized(Track, id, 0)
-              local pR = r.TrackFX_GetParamNormalized(Track, id, 1)
-              Snd.PreDelay_L = NormToMs(pL)
-              Snd.PreDelay_R = NormToMs(pR)
-
-              -- Locate "Mode" parameter so link state follows the JSFX
-              if Snd.PreDelay_ModeParamIndex == nil then
-                local numParams = r.TrackFX_GetNumParams(Track, id)
-                for p = 0, (numParams or 0) - 1 do
-                  local _, pname = r.TrackFX_GetParamName(Track, id, p)
-                  if pname == 'Mode' then
-                    Snd.PreDelay_ModeParamIndex = p
-                    break
-                  end
-                end
-              end
-
-              if Snd.PreDelay_ModeParamIndex ~= nil then
-                local m = r.TrackFX_GetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex)
-                -- JSFX 'Mode' parameter: treat 0.0 as linked, 1.0 as unlinked
-                Snd.PreDelay_Linked = (m or 0) < 0.5
-              else
-                -- Fallback: start linked
-                Snd.PreDelay_Linked = true
-              end
-
-              Snd.PreDelay_Init = true
-            end
           end
 
           -- Current UI values in ms
@@ -2289,11 +2280,15 @@ function Send_Btn(ctx, Track, t, BtnSize)
           if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
           im.PushItemWidth(ctx, 60)
           local changedL, newL = im.DragDouble(ctx,
-            '##PreDelay_L_' .. (t or '') .. '_' .. (i or 0),
+            '##PreDelay_L_' .. dragKey,
             Snd.PreDelay_L, 0.13, -100, 100, dragFormat)
           local leftDragActive = im.IsItemActive(ctx)
+          local leftClicked = im.IsItemClicked(ctx, 0)
           im.PopItemWidth(ctx)
           if clr then im.PopStyleColor(ctx) end
+          
+          -- Update drag state for left control
+          dragState.leftDragging = leftDragActive
           
           -- Double-click left drag to reset to 0
           if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
@@ -2311,14 +2306,14 @@ function Send_Btn(ctx, Track, t, BtnSize)
           local linked = Snd.PreDelay_Linked and true or false
           local linkTint = linked and 0xffffffff or 0x777777ff
           if Img and Img.Link then
-            if im.ImageButton(ctx, '##PreDelay_Link_' .. (t or '') .. '_' .. (i or 0),
+            if im.ImageButton(ctx, '##PreDelay_Link_' .. dragKey,
               Img.Link, linkSize, linkSize, nil, nil, nil, nil, nil, linkTint) then
               linked = not linked
               Snd.PreDelay_Linked = linked
-              -- Push link state into JSFX "Mode" parameter if we found it
-              if id and Snd.PreDelay_ModeParamIndex ~= nil then
+              -- Push link state into JSFX "Mode" parameter if we found it (check existence first)
+              if Snd.predelay_id and Snd.PreDelay_ModeParamIndex ~= nil then
                 -- 0.0 = linked, 1.0 = unlinked
-                r.TrackFX_SetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex, linked and 0 or 1)
+                r.TrackFX_SetParamNormalized(Track, Snd.predelay_id, Snd.PreDelay_ModeParamIndex, linked and 0 or 1)
               end
             end
             if im.IsItemHovered(ctx) then
@@ -2335,11 +2330,72 @@ function Send_Btn(ctx, Track, t, BtnSize)
           if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
           im.PushItemWidth(ctx, 60)
           local changedR, newR = im.DragDouble(ctx,
-            '##PreDelay_R_' .. (t or '') .. '_' .. (i or 0),
+            '##PreDelay_R_' .. dragKey,
             Snd.PreDelay_R, 0.13, -100, 100, dragFormat)
           local rightDragActive = im.IsItemActive(ctx)
+          local rightClicked = im.IsItemClicked(ctx, 0)
           im.PopItemWidth(ctx)
           if clr then im.PopStyleColor(ctx) end
+          
+          -- Update drag state for right control
+          dragState.rightDragging = rightDragActive
+          
+          -- Only check JSFX/container existence when clicked (not during drag)
+          -- Check on click or when drag just ended (was dragging but now not)
+          local isDragging = leftDragActive or rightDragActive
+          local dragJustStarted = (leftClicked or rightClicked) and not (wasLeftDragging or wasRightDragging)
+          local dragJustEnded = (wasLeftDragging or wasRightDragging) and not isDragging
+          -- Only check on click, drag end, or first time (when dragState hasn't been initialized for this send)
+          local shouldCheckExistence = dragJustStarted or dragJustEnded or (dragState.checked == nil)
+          
+          local id = nil
+          if shouldCheckExistence then
+            dragState.checked = true
+            -- Find / cache the JSFX inside the container (only check on click, not during drag)
+            id = Check_If_FX_Exist_In_Container(Track, Snd.Container, 'JS: Dual Time adjustment +/- Delay')
+            if not id then
+              -- No JSFX yet; show disabled controls, allow double-click to create
+              Snd.predelay_id = nil
+              Snd.PreDelay_Init = nil
+            else
+              Snd.predelay_id = id
+
+              -- One-time init of state from current FX parameters
+              if not Snd.PreDelay_Init then
+                -- Left / right delays (params 0 and 1)
+                local pL = r.TrackFX_GetParamNormalized(Track, id, 0)
+                local pR = r.TrackFX_GetParamNormalized(Track, id, 1)
+                Snd.PreDelay_L = NormToMs(pL)
+                Snd.PreDelay_R = NormToMs(pR)
+
+                -- Locate "Mode" parameter so link state follows the JSFX
+                if Snd.PreDelay_ModeParamIndex == nil then
+                  local numParams = r.TrackFX_GetNumParams(Track, id)
+                  for p = 0, (numParams or 0) - 1 do
+                    local _, pname = r.TrackFX_GetParamName(Track, id, p)
+                    if pname == 'Mode' then
+                      Snd.PreDelay_ModeParamIndex = p
+                      break
+                    end
+                  end
+                end
+
+                if Snd.PreDelay_ModeParamIndex ~= nil then
+                  local m = r.TrackFX_GetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex)
+                  -- JSFX 'Mode' parameter: treat 0.0 as linked, 1.0 as unlinked
+                  Snd.PreDelay_Linked = (m or 0) < 0.5
+                else
+                  -- Fallback: start linked
+                  Snd.PreDelay_Linked = true
+                end
+
+                Snd.PreDelay_Init = true
+              end
+            end
+          else
+            -- During drag, use cached ID
+            id = Snd.predelay_id
+          end
           
           -- Double-click right drag to reset to 0
           if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
@@ -2356,6 +2412,13 @@ function Send_Btn(ctx, Track, t, BtnSize)
           im.Text(ctx, 'ms')
 
           local function createPreDelayFX()
+            -- Preserve container wet/dry and enabled state to avoid side effects
+            local containerEnabled, containerWet
+            if Snd.Container and Snd.Container >= 0 then
+              containerEnabled = r.TrackFX_GetEnabled(Track, Snd.Container)
+              containerWet = r.TrackFX_GetParamNormalized(Track, Snd.Container, 0)
+            end
+
             local insertPos = Calc_Container_FX_Index(Track, Snd.Container, 1)
             local newId = AddFX_HideWindow(Track, 'JS: Dual Time adjustment +/- Delay', insertPos)
             if newId and newId >= 0 then
@@ -2373,33 +2436,29 @@ function Send_Btn(ctx, Track, t, BtnSize)
               r.TrackFX_SetParamNormalized(Track, newId, 0, normL)
               r.TrackFX_SetParamNormalized(Track, newId, 1, normR)
               Snd.HasPreDelay = true
+
+              -- Restore container wet/dry and enabled state
+              if Snd.Container and Snd.Container >= 0 then
+                if containerWet ~= nil then
+                  r.TrackFX_SetParamNormalized(Track, Snd.Container, 0, containerWet)
+                end
+                if containerEnabled ~= nil then
+                  r.TrackFX_SetEnabled(Track, Snd.Container, containerEnabled)
+                end
+              end
             end
           end
 
-          -- If JSFX doesn't exist yet, create it on drag or double-click
+          -- If JSFX doesn't exist yet, create it on click (single or double), not during drag
           if not id then
-            -- Apply local value changes even before the JSFX exists
-            if changedL then
-              Snd.PreDelay_L = newL
-              if Snd.PreDelay_Linked then
-                Snd.PreDelay_R = newL
-              end
-            end
-            if changedR then
-              Snd.PreDelay_R = newR
-              if Snd.PreDelay_Linked then
-                Snd.PreDelay_L = newR
-              end
-            end
-
-            local wantsCreate = changedL or changedR or leftDragActive or rightDragActive
-            if wantsCreate then
-              createPreDelayFX()
-            elseif im.IsItemClicked(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
+            local clicked = leftClicked or rightClicked
+            local doubleClicked = im.IsMouseDoubleClicked(ctx, 0)
+            if clicked or doubleClicked then
               createPreDelayFX()
             end
 
             if not id then
+              -- Don't apply changes if JSFX doesn't exist
               return
             end
           end
@@ -2409,6 +2468,11 @@ function Send_Btn(ctx, Track, t, BtnSize)
             changedR = true
             newL = newL or Snd.PreDelay_L or 0
             newR = newR or Snd.PreDelay_R or 0
+          end
+
+          -- Only apply changes when JSFX exists
+          if not id then
+            return
           end
 
           -- Update internal state from drags
@@ -2428,35 +2492,52 @@ function Send_Btn(ctx, Track, t, BtnSize)
             end
           end
 
-          -- Apply to all matching JSFX instances in the container when changed
-          if anyChanged then
+          -- Apply to all matching JSFX instances in the container when changed (only if JSFX exists)
+          if anyChanged and id then
             local normL = MsToNorm(Snd.PreDelay_L)
             local normR = MsToNorm(Snd.PreDelay_R)
 
-            local _, HowManyFXinContainer = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_count')
-            local HowManyFXinContainer = tonumber(HowManyFXinContainer)
+            -- Only access container if it exists and is valid
+            if Snd.Container and Snd.Container >= 0 then
+              local _, HowManyFXinContainer = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_count')
+              local HowManyFXinContainer = tonumber(HowManyFXinContainer)
 
-            for ci = 0, (HowManyFXinContainer or 0) - 1 do
-              local _, fxid = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_item.' .. ci)
-              local fxid = tonumber(fxid)
-              local _, nm = r.TrackFX_GetNamedConfigParm(Track, fxid, 'fx_name')
+              if HowManyFXinContainer and HowManyFXinContainer > 0 then
+                for ci = 0, HowManyFXinContainer - 1 do
+                  local _, fxid = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_item.' .. ci)
+                  local fxid = tonumber(fxid)
+                  if fxid and fxid >= 0 then
+                    local _, nm = r.TrackFX_GetNamedConfigParm(Track, fxid, 'fx_name')
 
-              if nm == 'JS: Dual Time adjustment +/- Delay' then
-                r.TrackFX_SetParamNormalized(Track, fxid, 0, normL)
-                r.TrackFX_SetParamNormalized(Track, fxid, 1, normR)
-                -- Also keep JSFX "Mode" in sync with link state if we found it
-                if Snd.PreDelay_ModeParamIndex ~= nil then
-                  -- Keep JSFX 'Mode' in sync: 0.0 = linked, 1.0 = unlinked
-                  r.TrackFX_SetParamNormalized(Track, fxid, Snd.PreDelay_ModeParamIndex,
-                    Snd.PreDelay_Linked and 0 or 1)
+                    if nm == 'JS: Dual Time adjustment +/- Delay' then
+                      r.TrackFX_SetParamNormalized(Track, fxid, 0, normL)
+                      r.TrackFX_SetParamNormalized(Track, fxid, 1, normR)
+                      -- Also keep JSFX "Mode" in sync with link state if we found it
+                      if Snd.PreDelay_ModeParamIndex ~= nil then
+                        -- Keep JSFX 'Mode' in sync: 0.0 = linked, 1.0 = unlinked
+                        r.TrackFX_SetParamNormalized(Track, fxid, Snd.PreDelay_ModeParamIndex,
+                          Snd.PreDelay_Linked and 0 or 1)
+                      end
+                    end
+                  end
                 end
+
+                local PreDelayIdx = Calc_Container_FX_Index(Track, Snd.Container)
+                local pairIndex = GetContainerStereoPairIndex(Track, Snd.Container) or 2
+                r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2) -- align send to container's pair
+                Snd.HasPreDelay = true
               end
             end
+          end
 
-            local PreDelayIdx = Calc_Container_FX_Index(Track, Snd.Container)
-            local pairIndex = GetContainerStereoPairIndex(Track, Snd.Container) or 2
-            r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2) -- align send to container's pair
-            Snd.HasPreDelay = true
+          -- Restore container wet/dry and enabled state if we created the JSFX
+          if createdPreDelayFX and Snd.Container and Snd.Container >= 0 then
+            if containerWetBefore ~= nil then
+              r.TrackFX_SetParamNormalized(Track, Snd.Container, 0, containerWetBefore)
+            end
+            if containerEnabledBefore ~= nil then
+              r.TrackFX_SetEnabled(Track, Snd.Container, containerEnabledBefore)
+            end
           end
         end
         local function AddFX()
@@ -3118,7 +3199,9 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
   local Chan = r.GetTrackSendInfo_Value(Track, -1, i, 'I_DSTCHAN')
   if Chan > 0 then 
     im.Button(ctx,' '..math.ceil(Chan+1)..'-'..math.ceil(Chan+2)..' ')
-    local w, h = HighlightItem(0x00000000,WDL, Clr.ChanBadgeText)
+    -- Use darker colors if receive is disabled
+    local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
+    local w, h = HighlightItem(0x00000000,WDL, badgeText)
     BtnSizeOffset = BtnSizeOffset - w
     SL()
   end
@@ -3684,9 +3767,12 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
         else
           badgeH = math.min(h, rCurH)  -- Use smaller of text height or row height
         end
-        im.DrawList_AddRectFilled(WDL, CurX  , CurY, CurX + w , CurY + badgeH, Clr.ChanBadgeBg)
-        im.DrawList_AddText(WDL,  CurX  , CurY ,Clr.ChanBadgeText,str )
-        im.DrawList_AddRect(WDL, CurX  , CurY, CurX + w , CurY + badgeH, Clr.ChanBadgeText)
+        -- Use darker colors if receive is disabled
+        local badgeBg = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeBg, 0.5) or Clr.ChanBadgeBg) or Clr.ChanBadgeBg
+        local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
+        im.DrawList_AddRectFilled(WDL, CurX  , CurY, CurX + w , CurY + badgeH, badgeBg)
+        im.DrawList_AddText(WDL,  CurX  , CurY ,badgeText,str )
+        im.DrawList_AddRect(WDL, CurX  , CurY, CurX + w , CurY + badgeH, badgeText)
 
         --local w, h = HighlightItem(0x00000000,WDL, 0xffffffff)
         BtnSizeOffset = BtnSizeOffset - w
@@ -4301,6 +4387,11 @@ function Sends_List(ctx, t, HeightOfs, T)
       table.sort(list, function(a,b) return (a.idx or 0) > (b.idx or 0) end)
       r.Undo_BeginBlock()
       for _, e in ipairs(list) do
+        -- If container exists, reset send channel to 1-2 before deleting container
+        if e.container and e.idx and e.idx < r.GetTrackNumSends(Track, 0) then
+          -- Reset send source channel to 0 (channels 1-2) before deleting container
+          r.SetTrackSendInfo_Value(Track, 0, e.idx, 'I_SRCCHAN', 0)
+        end
         if e.container then
           -- best-effort: ignore if container index shifted; caller provided last known index
           if e.container >= 0 then pcall(r.TrackFX_Delete, Track, e.container) end
