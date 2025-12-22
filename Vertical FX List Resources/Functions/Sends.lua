@@ -1128,6 +1128,7 @@ local function DrawSendPanKnob(ctx, Track, sendIdx, sendType, rowHeight, id, alp
   
   -- Drawing
   local tlx, tly = im.GetItemRectMin(ctx)
+  local trx, bry = im.GetItemRectMax(ctx)
   -- Use visual radius that's larger than interaction radius for better visibility
   local visualRadius = knobRadius + 1.0  -- Make visual elements 1px larger
   local center_x = tlx + visualRadius
@@ -1136,13 +1137,23 @@ local function DrawSendPanKnob(ctx, Track, sendIdx, sendType, rowHeight, id, alp
   
   -- Determine Theme Color - derive from user's chosen send/receive colors
   local baseAccentColor
+  local bgColor
   if sendType == 0 then
     -- Send: use Clr.Send
     baseAccentColor = Clr.Send or 0x289F81FF
+    bgColor = Clr.Send or 0x289F81FF
   else
     -- Receive: use Clr.ReceiveSend
     baseAccentColor = Clr.ReceiveSend or 0x569CD6FF
+    bgColor = Clr.ReceiveSend or 0x569CD6FF
   end
+  
+  -- Draw background rectangle to match the send/receive row background color
+  im.DrawList_AddRectFilled(draw_list, tlx, tly, trx, bry, bgColor)
+  
+  -- Draw black solid circle as base for the pan knob
+  local blackColor = im.ColorConvertDouble4ToU32(0, 0, 0, 1.0 * alphaMultiplier)
+  im.DrawList_AddCircleFilled(draw_list, center_x, center_y, visualRadius, blackColor)
   
   -- Arc calculation
   local ANGLE_MIN = math.pi * 0.75
@@ -1226,7 +1237,7 @@ end
 
 function Send_Btn(ctx, Track, t, BtnSize)
   if t < -1 then return end 
-    --- send buttons color
+  --- send buttons color
   do
     local base = Clr.Send
     local hvr  = Clr.SendHvr or (LightenColorU32 and LightenColorU32(base, 0.15)) or base
@@ -1290,68 +1301,68 @@ function Send_Btn(ctx, Track, t, BtnSize)
       local panHasData = (envPan and EnvelopeHasAnyData(envPan)) or false
       --
       local hasAuto = volHasData or panHasData
-       if hasAuto then
-         local baseH = (SendsLineHeight or lineH or 14)
-         local iconSz = math.max(12, math.floor(baseH + 0.5))
-         -- During delete animation, replace with a dummy of shrunken height to not block vertical collapse
-         if rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1 then
-           local h = (rowCurH or nameBtnH or baseH or iconSz)
-           im.Dummy(ctx, iconSz, h)
-           SendValW_Ofs = (SendValW_Ofs or 0) + iconSz
-         else
-           -- Determine tint based on state
-           -- Only check volume envelope state (not pan)
-           local anyBypassed = false
-           local anyVisible = false
-           
-           if envVol then
-             local ok, _ = r.GetEnvelopeName(envVol)
-             if ok then
-               local visibleVol, showVol, activeVol = GetEnvelopeStates(envVol)
-               if visibleVol and showVol then anyVisible = true end
-               if not activeVol then anyBypassed = true end
-             end
-           end
-           
-           local tint
-           if anyBypassed then
-             tint = 0x020402ff -- dark gray when bypassed
-           elseif anyVisible then
-             tint = 0xffffffff -- white when shown
-           else
-             tint = 0x999999ff -- gray when hidden
-           end
-           if not AnySendAnimActive and im.ImageButton(ctx, '##SendAuto'..tostring(TrkID)..'_'..i, Img.Graph, iconSz, iconSz, nil, nil, nil, nil, nil, tint) then
-             if Mods == Alt then
-               -- Alt+click: Delete envelopes using actions
-               r.Undo_BeginBlock()
-               r.PreventUIRefresh(1)
-               
-               if envVol then
-                 r.SetCursorContext(2, envVol)
-                 r.Main_OnCommand(40065, 0) -- Delete selected envelope
-               end
-               if envPan then
-                 r.SetCursorContext(2, envPan)
-                 r.Main_OnCommand(40065, 0) -- Delete selected envelope
-               end
-               
-               r.PreventUIRefresh(-1)
-               r.Undo_EndBlock('Delete send envelopes', -1)
-             elseif Mods == Shift then
-               ToggleEnvelopeActive(envVol)
-             else
-               ToggleEnvelopeVisible(envVol)
-               ToggleEnvelopeVisible(envPan)
-             end
-             r.TrackList_AdjustWindows(false)
-           end
-           if im.IsItemHovered(ctx) then
-             SetHelpHint('LMB = Toggle Envelope Visibility', 'Shift+LMB = Toggle Envelope Active/Bypass', 'Alt+LMB = Delete Envelopes')
-           end
-           SL()
-           SendValW_Ofs = (SendValW_Ofs or 0) + iconSz
-         end
+      if hasAuto then
+        local baseH = (SendsLineHeight or lineH or 14)
+        local iconSz = math.max(12, math.floor(baseH + 0.5))
+        -- During delete animation, replace with a dummy of shrunken height to not block vertical collapse
+        if rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1 then
+          local h = (rowCurH or nameBtnH or baseH or iconSz)
+          im.Dummy(ctx, iconSz, h)
+          SendValW_Ofs = (SendValW_Ofs or 0) + iconSz
+        else
+          -- Determine tint based on state
+          -- Only check volume envelope state (not pan)
+          local anyBypassed = false
+          local anyVisible = false
+          
+          if envVol then
+            local ok, _ = r.GetEnvelopeName(envVol)
+            if ok then
+              local visibleVol, showVol, activeVol = GetEnvelopeStates(envVol)
+              if visibleVol and showVol then anyVisible = true end
+              if not activeVol then anyBypassed = true end
+            end
+          end
+          
+          local tint
+          if anyBypassed then
+            tint = 0x020402ff -- dark gray when bypassed
+          elseif anyVisible then
+            tint = 0xffffffff -- white when shown
+          else
+            tint = 0x999999ff -- gray when hidden
+          end
+          if not AnySendAnimActive and im.ImageButton(ctx, '##SendAuto'..tostring(TrkID)..'_'..i, Img.Graph, iconSz, iconSz, nil, nil, nil, nil, nil, tint) then
+            if Mods == Alt then
+              -- Alt+click: Delete envelopes using actions
+              r.Undo_BeginBlock()
+              r.PreventUIRefresh(1)
+              
+              if envVol then
+                r.SetCursorContext(2, envVol)
+                r.Main_OnCommand(40065, 0) -- Delete selected envelope
+              end
+              if envPan then
+                r.SetCursorContext(2, envPan)
+                r.Main_OnCommand(40065, 0) -- Delete selected envelope
+              end
+              
+              r.PreventUIRefresh(-1)
+              r.Undo_EndBlock('Delete send envelopes', -1)
+            elseif Mods == Shift then
+              ToggleEnvelopeActive(envVol)
+            else
+              ToggleEnvelopeVisible(envVol)
+              ToggleEnvelopeVisible(envPan)
+            end
+            r.TrackList_AdjustWindows(false)
+          end
+          if im.IsItemHovered(ctx) then
+            SetHelpHint('LMB = Toggle Envelope Visibility', 'Shift+LMB = Toggle Envelope Active/Bypass', 'Alt+LMB = Delete Envelopes')
+          end
+          SL()
+          SendValW_Ofs = (SendValW_Ofs or 0) + iconSz
+        end
       end
     end
     Automation_Indicator()
@@ -1421,7 +1432,8 @@ function Send_Btn(ctx, Track, t, BtnSize)
     -- if Send Destination Track is hidden (skip while animating deletion and while hover is blocked)
     if Dest_Valid and not AnySendAnimActive and not HoverBlocked and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) and r.GetMediaTrackInfo_Value(DestTrk, 'B_SHOWINTCP') == 0 then
       Dest_Hidden = true
-      if im.ImageButton(ctx, '##HideBtn_send_hidden_'..(i or 0)..'_'..(TrkID or ''), Img.Hide, HideBtnSz, HideBtnSz, nil, nil, nil, nil, nil, Clr.Attention) then
+      local hideBtnTint = (Bypass == 1) and 0x020402ff or Clr.Attention
+      if im.ImageButton(ctx, '##HideBtn_send_hidden_'..(i or 0)..'_'..(TrkID or ''), Img.Hide, HideBtnSz, HideBtnSz, nil, nil, nil, nil, nil, hideBtnTint) then
         r.SetMediaTrackInfo_Value(DestTrk, 'B_SHOWINTCP', 1)
         RefreshUI_HideTrack()
       end
@@ -1434,7 +1446,8 @@ function Send_Btn(ctx, Track, t, BtnSize)
 
     -- if hovering send, show Hide Track icon (skip while animating deletion and while hover is blocked)
     if Dest_Valid and HoverSend == i .. TrkID and not Dest_Hidden and not AnySendAnimActive and not HoverBlocked and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) then
-      if im.ImageButton(ctx, '##HideBtn_send_hover_'..(i or 0)..'_'..(TrkID or ''), Img.Show, HideBtnSz, HideBtnSz, nil, nil, nil, nil, nil, Clr.Attention) then
+      local hideBtnTint = (Bypass == 1) and 0x020402ff or Clr.Attention
+      if im.ImageButton(ctx, '##HideBtn_send_hover_'..(i or 0)..'_'..(TrkID or ''), Img.Show, HideBtnSz, HideBtnSz, nil, nil, nil, nil, nil, hideBtnTint) then
         r.SetMediaTrackInfo_Value(DestTrk, 'B_SHOWINTCP', 0)
         RefreshUI_HideTrack()
       end
@@ -1444,9 +1457,15 @@ function Send_Btn(ctx, Track, t, BtnSize)
       end
       SL()
     end
-    -- if hovering send, show solo icon (skip while animating deletion)
-    if HoverSend == i .. TrkID and not AnySendAnimActive and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) then
+    -- if hovering send, show solo icon (skip while animating deletion and while hover is blocked)
+    if HoverSend == i .. TrkID and not AnySendAnimActive and not HoverBlocked and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) then
       im.PushFont(ctx, Font_Andale_Mono_10_B)
+      if Bypass == 1 then
+        im.PushStyleColor(ctx, im.Col_Text, 0x020402ff)
+        im.PushStyleColor(ctx, im.Col_Button, 0x00000000)
+        im.PushStyleColor(ctx, im.Col_ButtonHovered, 0x00000000)
+        im.PushStyleColor(ctx, im.Col_ButtonActive, 0x00000000)
+      end
       if im.Button(ctx, 'S', 14, 14) then -- Solo Button
         if Mods == 0 then
           if Dest_Valid then ToggleSolo(DestTrk) end
@@ -1482,6 +1501,9 @@ function Send_Btn(ctx, Track, t, BtnSize)
       if im.IsItemHovered(ctx) then
         HoverEyes = true
         SetHelpHint('LMB = Toggle Send Track Solo', 'Ctrl+LMB = Solo This Send Only')
+      end
+      if Bypass == 1 then
+        im.PopStyleColor(ctx, 4)
       end
       im.PopFont(ctx)
       SL()
@@ -1700,10 +1722,10 @@ function Send_Btn(ctx, Track, t, BtnSize)
             for _, ent in ipairs(entries) do
               if ent.type == 0 and ent.idx ~= nil and ent.idx < r.GetTrackNumSends(tr, 0) then
                 if not (guid == activeGUID and ent.idx == i) then
-                local cur = r.GetTrackSendInfo_Value(tr, 0, ent.idx, 'D_VOL')
-                local newDB = VAL2DB(cur) + deltaDB
-                local newLin = SetMinMax(DB2VAL(newDB), 0, 4)
-                r.BR_GetSetTrackSendInfo(tr, 0, ent.idx, 'D_VOL', true, newLin)
+                  local cur = r.GetTrackSendInfo_Value(tr, 0, ent.idx, 'D_VOL')
+                  local newDB = VAL2DB(cur) + deltaDB
+                  local newLin = SetMinMax(DB2VAL(newDB), 0, 4)
+                  r.BR_GetSetTrackSendInfo(tr, 0, ent.idx, 'D_VOL', true, newLin)
                 end
               end
             end
@@ -1743,7 +1765,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
     -- Capture position before VolumeBar for patch line (left edge of volume drag area)
     local volDragX, volDragY = im.GetCursorScreenPos(ctx)
    -- im.InvisibleButton(ctx, '##VolDrag_' .. i .. '_' .. TrkID, BtnSize, volBtnH)
-    VolumeBar(ctx,BtnSize,i, 0, volBtnH)
+    VolumeBar(ctx,BtnSize,i, 0, lineH+3)
     -- If the send name was clicked and the user is dragging within the volume area, treat it as a drag (prevent popup)
     if im.IsMouseDown(ctx, 0) and SendNameClickTrack == Track and SendNameClickIndex == i then
       local mx, my = im.GetMousePos(ctx)
@@ -1850,32 +1872,32 @@ function Send_Btn(ctx, Track, t, BtnSize)
     -- Right-click on send: select destination/source track and scroll to it in TCP
     -- Alt+Right-click: show volume envelope for the send
     if im.IsItemClicked(ctx, 1) and not MarqueeSelection.isActive and not MarqueeSelection.hasDragged then -- Right mouse button, not during marquee and not a drag
-       if Mods == Alt then
-         -- Alt+Right-click: show volume envelope for this send
-         -- Select the source track first (required for envelope operations)
-         r.SetOnlyTrackSelected(Track)
-         
-         -- First try to find existing envelope
-         local envVol, _ = FindSendEnvelopesForSendIndex(Track, i)
-         
-         if not envVol then
-           -- Envelope doesn't exist yet, need to create/show it
-           -- Use action 41725 to show send volume envelopes for selected track
-           -- This will create the envelopes if they don't exist
-           r.Main_OnCommand(41725, 0) -- Show/hide track send volume envelope
-           
-           -- Now try to find it again
-           envVol, _ = FindSendEnvelopesForSendIndex(Track, i)
-         end
-         
-         if envVol and envVol ~= 0 then
-           -- Verify it's a valid envelope object
-           local ok, name = r.GetEnvelopeName(envVol)
-           if ok then
-             RevealEnvelopeInTCP(envVol)
-             r.TrackList_AdjustWindows(false)
-           end
-         end
+      if Mods == Alt then
+        -- Alt+Right-click: show volume envelope for this send
+        -- Select the source track first (required for envelope operations)
+        r.SetOnlyTrackSelected(Track)
+        
+        -- First try to find existing envelope
+        local envVol, _ = FindSendEnvelopesForSendIndex(Track, i)
+        
+        if not envVol then
+          -- Envelope doesn't exist yet, need to create/show it
+          -- Use action 41725 to show send volume envelopes for selected track
+          -- This will create the envelopes if they don't exist
+          r.Main_OnCommand(41725, 0) -- Show/hide track send volume envelope
+          
+          -- Now try to find it again
+          envVol, _ = FindSendEnvelopesForSendIndex(Track, i)
+        end
+        
+        if envVol and envVol ~= 0 then
+          -- Verify it's a valid envelope object
+          local ok, name = r.GetEnvelopeName(envVol)
+          if ok then
+            RevealEnvelopeInTCP(envVol)
+            r.TrackList_AdjustWindows(false)
+          end
+        end
       else
         -- Normal right-click: select destination/source track and scroll to it in TCP
         local targetTrack = nil
@@ -1916,14 +1938,40 @@ function Send_Btn(ctx, Track, t, BtnSize)
       -- Use source track GUID instead of track name to avoid issues when tracks are renamed
       local containerName = 'Send FX for '..srcGUID..'##'..DestTrkGUID
       
-      -- Search all FX on the track manually to find containers with matching name
+      -- Don't reset Snd.Container if we're in the process of creating one
+      -- This prevents infinite container creation
+      if Snd.ContainerCreating then
+        return
+      end
+      
+      -- If Snd.Container is already set, verify it's still valid before searching
+      if Snd.Container ~= nil then
+        local fxCount = r.TrackFX_GetCount(Track)
+        if Snd.Container >= 0 and Snd.Container < fxCount then
+          -- Check renamed_name instead of display name (r.TrackFX_GetFXName returns display name, not type)
+          local _, renamed = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'renamed_name')
+          if renamed == containerName then
+            -- Container is still valid with correct name, no need to search
+            return
+          elseif not renamed or renamed == '' then
+            -- Container exists but doesn't have a name yet (might be newly created)
+            -- Don't reset it, wait for the name to be set
+            return
+          end
+        end
+        -- Container is invalid or doesn't exist, clear it and search for a new one
+        Snd.Container = nil
+      end
+      
+      -- Search all FX on the track manually to find containers with matching renamed_name
       local fxCount = r.TrackFX_GetCount(Track)
       local foundContainer = nil
       for fx = 0, fxCount - 1 do
-        local _, fxName = r.TrackFX_GetFXName(Track, fx)
-        if fxName == 'Container' then
-          local _, renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
-          if renamed == containerName then
+        local _, renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
+        if renamed == containerName then
+          -- Found matching renamed_name, verify it's actually a Container
+          local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, fx, 'container_count')
+          if containerCount then
             foundContainer = fx
             break
           end
@@ -1936,15 +1984,11 @@ function Send_Btn(ctx, Track, t, BtnSize)
         -- Also try r.TrackFX_GetByName as a fallback
         local id = r.TrackFX_GetByName(Track, containerName, false) 
         if id and id >= 0 then 
-          -- Verify it's actually a container with the correct name
-          local _, fxName = r.TrackFX_GetFXName(Track, id)
-          if fxName == 'Container' then
-            local _, renamed = r.TrackFX_GetNamedConfigParm(Track, id, 'renamed_name')
-            if renamed == containerName then
-              Snd.Container = id
-            else
-              Snd.Container = nil
-            end
+          -- Verify it's actually a container by checking container_count parameter
+          local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, id, 'container_count')
+          local _, renamed = r.TrackFX_GetNamedConfigParm(Track, id, 'renamed_name')
+          if containerCount and renamed == containerName then
+            Snd.Container = id
           else
             Snd.Container = nil
           end
@@ -1962,14 +2006,14 @@ function Send_Btn(ctx, Track, t, BtnSize)
     -- Calculate pan knob offset to prevent overlap with volume readout
     local panKnobOffset = 0
     if ShowSendPanKnobs then
-      -- Use animated height for pan knob calculations
-      local animEffectiveH = baseRowH
+      -- Use animated height for pan knob calculations (matching the actual knob height: volBtnH + 3)
+      local animEffectiveH = (volBtnH or baseRowH) + 3
       if animProg and animProg < 1 then
         local effective_p = math.max(0, (animProg - 0.25) / 0.75)
         local scale = 1 - (effective_p * effective_p * effective_p)
-        animEffectiveH = math.max(0.0001, baseRowH * scale)
+        animEffectiveH = math.max(0.0001, ((volBtnH or baseRowH) + 3) * scale)
       end
-      local effectiveHeight = animEffectiveH + 2
+      local effectiveHeight = animEffectiveH
       local knobRadius = (effectiveHeight * 0.5) - 0.5
       if knobRadius < 4 then knobRadius = 4 end
       local knobSize = knobRadius * 2
@@ -1991,74 +2035,19 @@ function Send_Btn(ctx, Track, t, BtnSize)
         local scale = 1 - (effective_p * effective_p * effective_p)
         badgeH = math.max(0.0001, h * scale)
       end
-      im.DrawList_AddRectFilled(WDL, CurX  , CurY, CurX + w , CurY + badgeH, Clr.ChanBadgeBg)
-      im.DrawList_AddText(WDL,  CurX  , CurY ,Clr.ChanBadgeText,str )
-      im.DrawList_AddRect(WDL, CurX  , CurY, CurX + w , CurY + badgeH, Clr.ChanBadgeText)
+      local badgeX = CurX - 5  -- Move badge 5px to the left to prevent overlap with volume readout
+      im.DrawList_AddRectFilled(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, Clr.ChanBadgeBg)
+      im.DrawList_AddText(WDL,  badgeX  , CurY ,Clr.ChanBadgeText,str )
+      im.DrawList_AddRect(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, Clr.ChanBadgeText)
       BtnSizeOffset = BtnSizeOffset - w
       SL()
-    elseif --[[ (not im.IsItemHovered(ctx) or AnySendAnimActive or HoverBlocked) and ]] --[[ not Snd.HvrOnFXSend and ]] not Snd.Container  then 
-      -- vertically squash send icon according to delete animation progress
-      local scaleY = 1
-      if rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1 then
-        local effective_p = math.max(0, ((rowDeleteAnim.progress or 0) - 0.25) / 0.75)
-        scaleY = math.max(0.0001, 1 - (effective_p * effective_p * effective_p))
-      end
-      -- Convert send icon to ImageButton with hover effects and tooltip
-      local iconSize = 13 * scaleY
-      local iconWidth = 13
-      local iconX = CurX - panKnobOffset + 20 - (WetDryKnobSz or 7)  -- Move left by wetdry knob size
-      local iconY = CurY
-      im.SetCursorScreenPos(ctx, iconX, iconY)
-      -- Use base tint (slightly transparent for normal state)
-      local baseTint = 0xCCFFFFFF  -- Slightly transparent white for normal state
-      local sendIconClicked = im.ImageButton(ctx, '##SendIcon_'..tostring(t)..'_'..i, Img.Send, iconWidth, iconSize, nil, nil, nil, nil, nil, baseTint)
-      -- Check if hovered and apply bold effect (brighter tint) and show tooltip
-      if im.IsItemHovered(ctx) then
-        -- Make icon bold by overlaying with brighter tint (full opacity)
-        local hoverTint = 0xFFFFFFFF  -- Full opacity white for bold effect
-        local L, T = im.GetItemRectMin(ctx)
-        local R, B = im.GetItemRectMax(ctx)
-        im.DrawList_AddImage(WDL, Img.Send, L, T, R, B, nil, nil, nil, nil, hoverTint)
-        -- Show tooltip
-        im.SetItemTooltip(ctx, 'Add send FX')
-      end
-      -- Handle click - trigger same function as send FX button
-      if sendIconClicked then
-        im.OpenPopup(ctx, 'Add FX Window for Send FX' ..tostring(Track)..i)
-      end
-      -- Add icon width to SendValW_Ofs to reduce volume button width and prevent overlap
-      SendValW_Ofs = (SendValW_Ofs or 0) + iconWidth
-      SL()
+    else
+      -- Always draw icon/FX button at rightmost position (send icon if no container, FX button if container exists)
+      shouldDrawSendIconRight = true
     end
 
-    local fxBtnHovered = false
-    if --[[ Snd.HvrOnFXSend or ]] Snd.Container then 
-      -- Move cursor left by 20px to prevent FX button from obstructing volume readout/pan knob
-      local curX, curY = im.GetCursorPos(ctx)
-      if curX then
-        im.SetCursorPosX(ctx, curX - 20)
-      end
-      im.PushFont(ctx, Impact_10)
-      -- shrink FX button height along with the row during delete animation (add 3px to match volume drag height)
-      local fxBtnH = (volBtnH or (SendsLineHeight or 13)) + 3
-      -- center text and compute a safe width to avoid right-side cropping
-      -- vertically nudge slightly upward for better optical centering
-      im.PushStyleVar(ctx, im.StyleVar_ButtonTextAlign, 0 , 0.5)
-      im.PushStyleVar(ctx, im.StyleVar_FramePadding, 2, 0)
-      local fxLabel = 'FX'
-      local fxTw, _ = im.CalcTextSize(ctx, fxLabel)
-      local fxBtnW = math.max((SendFXBtnSize or 12), fxTw + 8)
-      local rv = im.Button(ctx, fxLabel .. '##'..t..'  i '..i, fxBtnW, fxBtnH)
-      im.PopStyleVar(ctx)
-      im.PopStyleVar(ctx)
-      im.PopFont(ctx)
-      if rv then 
-        im.OpenPopup(ctx, 'Add FX Window for Send FX' ..tostring(Track)..i)
-      end
-      SL()
-      fxBtnHovered = im.IsItemHovered(ctx)
-      SendValW_Ofs = fxBtnW
-    end
+    -- FX button will be drawn after volume button, so no width reservation needed here
+    -- SendValW_Ofs remains 0 (or whatever other offsets apply)
 
     local function SendFX()
       
@@ -2066,7 +2055,6 @@ function Send_Btn(ctx, Track, t, BtnSize)
         
         Snd.HvrOnFXSend = true 
         local function Add_Container_If_Not_Exist()
-          
           -- Look for containers that match the name by checking renamed_name
           -- Use source track GUID instead of track name to avoid issues when tracks are renamed
           local targetName = 'Send FX for '..srcGUID..'##'..DestTrkGUID
@@ -2076,27 +2064,31 @@ function Send_Btn(ctx, Track, t, BtnSize)
             local fxCount = r.TrackFX_GetCount(Track)
             -- Verify the container index is still valid
             if Snd.Container >= 0 and Snd.Container < fxCount then
-              local _, fxName = r.TrackFX_GetFXName(Track, Snd.Container)
-              if fxName == 'Container' then
-                local _, renamed = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'renamed_name')
-                if renamed == targetName then
-                  -- Container is already set and valid, no need to search or create
-                  return
-                end
+              -- Check renamed_name instead of display name (r.TrackFX_GetFXName returns display name)
+              local _, renamed = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'renamed_name')
+              if renamed == targetName then
+                -- Container is already set and valid, no need to search or create
+                return
+              elseif not renamed or renamed == '' then
+                -- Container exists but doesn't have a name yet (might be newly created)
+                -- Set the name and return to prevent creating another
+                r.TrackFX_SetNamedConfigParm(Track, Snd.Container, 'renamed_name', targetName)
+                return
               end
             end
             -- Container was set but is invalid, reset it
             Snd.Container = nil
           end
           
-          -- Search all FX on the track manually to find containers with matching name
+          -- Search all FX on the track manually to find containers with matching renamed_name
           local fxCount = r.TrackFX_GetCount(Track)
           local foundContainer = nil
           for fx = 0, fxCount - 1 do
-            local _, fxName = r.TrackFX_GetFXName(Track, fx)
-            if fxName == 'Container' then
-              local _, renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
-              if renamed == targetName then
+            local _, renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
+            if renamed == targetName then
+              -- Found matching renamed_name, verify it's actually a Container
+              local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, fx, 'container_count')
+              if containerCount then
                 -- Found existing container with matching name pattern
                 foundContainer = fx
                 break
@@ -2114,16 +2106,14 @@ function Send_Btn(ctx, Track, t, BtnSize)
           -- Also try r.TrackFX_GetByName as a fallback (in case manual search missed it)
           local foundByName = r.TrackFX_GetByName(Track, targetName, false)
           if foundByName and foundByName >= 0 then
-            -- Verify it's actually a container with the correct name pattern
-            local _, fxName = r.TrackFX_GetFXName(Track, foundByName)
-            if fxName == 'Container' then
-              local _, renamed = r.TrackFX_GetNamedConfigParm(Track, foundByName, 'renamed_name')
-              if renamed == targetName then
-                -- Found existing container with matching name pattern
-                Snd.Container = foundByName
-                Snd.ContainerCreating = nil  -- Clear flag in case it was set
-                return
-              end
+            -- Verify it's actually a container by checking container_count parameter
+            local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, foundByName, 'container_count')
+            local _, renamed = r.TrackFX_GetNamedConfigParm(Track, foundByName, 'renamed_name')
+            if containerCount and renamed == targetName then
+              -- Found existing container with matching name pattern
+              Snd.Container = foundByName
+              Snd.ContainerCreating = nil  -- Clear flag in case it was set
+              return
             end
           end
           
@@ -2137,266 +2127,339 @@ function Send_Btn(ctx, Track, t, BtnSize)
           Snd.ContainerCreating = true
           
           -- No matching container exists, create a new one
-          -- Try creating at position 1 first
-          local newContainerIdx = AddFX_HideWindow(Track, 'Container', 1)
-            if not newContainerIdx then 
-              newContainerIdx = r.TrackFX_GetCount(Track)-1
-            end 
-            
-            -- Verify this is a new container (doesn't already have a renamed_name)
-            -- If it does, it means an existing container was converted, so try creating at the end
-            local _, existingRenamed = r.TrackFX_GetNamedConfigParm(Track, newContainerIdx, 'renamed_name')
-            if existingRenamed and existingRenamed ~= '' then
-              -- This container was converted, not created new - try creating at the end instead
-              newContainerIdx = AddFX_HideWindow(Track, 'Container', -1)
-              if not newContainerIdx then
-                newContainerIdx = r.TrackFX_GetCount(Track)-1
-              end
-              
-              -- Check again if this one is new
-              local _, existingRenamed2 = r.TrackFX_GetNamedConfigParm(Track, newContainerIdx, 'renamed_name')
-              if existingRenamed2 and existingRenamed2 ~= '' then
-                -- Still converted, can't create new container - clear flag and abort
-                Snd.ContainerCreating = nil
-                return
-              end
-            end
-            
-            -- Set the renamed_name on the new container with the correct pattern
-            r.TrackFX_SetNamedConfigParm(Track, newContainerIdx, 'renamed_name', targetName)
-            
-            -- Verify the container can be found by name (this ensures it's properly set)
-            local verifyFound = r.TrackFX_GetByName(Track, targetName, false)
-            if verifyFound and verifyFound >= 0 then
-              -- Double-check it's actually a container with the correct name
-              local _, fxName = r.TrackFX_GetFXName(Track, verifyFound)
-              if fxName == 'Container' then
-                local _, renamed = r.TrackFX_GetNamedConfigParm(Track, verifyFound, 'renamed_name')
-                if renamed == targetName then
-                  -- Successfully created and verified, use the verified index
-                  Snd.Container = verifyFound
-                  Snd.ContainerCreating = nil  -- Clear the flag
-                  local chan = tonumber( r.GetMediaTrackInfo_Value( Track, 'I_NCHAN'))
-                  if chan <= 2 then 
-                    r.SetMediaTrackInfo_Value(Track,  'I_NCHAN', 4)
-                  end 
-                  local pairIndex = FindNextSendFXStereoPair(Track)
-                  Set_Out_Channel_To_A_New_Stereo_Channel(Track, Snd.Container, pairIndex)
-                  r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2)
-                else
-                  -- Name doesn't match, clear flag and abort (will retry next frame)
-                  Snd.ContainerCreating = nil
-                  return
-                end
-              else
-                -- Not a container, clear flag and abort (will retry next frame)
-                Snd.ContainerCreating = nil
-                return
-              end
-            else
-              -- Failed to verify container after creation, clear flag and abort (will retry next frame)
+          -- Use -1 to append to end (more reliable than position 1)
+          local newContainerIdx = AddFX_HideWindow(Track, 'Container', -1)
+          if not newContainerIdx or newContainerIdx < 0 then 
+            newContainerIdx = r.TrackFX_GetCount(Track)-1
+          end
+          
+          -- Immediately check what type of FX was actually created
+          if newContainerIdx and newContainerIdx >= 0 then
+            local _, actualFxName = r.TrackFX_GetFXName(Track, newContainerIdx)
+            if actualFxName ~= 'Container' then
               Snd.ContainerCreating = nil
               return
             end
+          else
+            Snd.ContainerCreating = nil
+            return
+          end 
+          
+          -- Verify this is a new container (doesn't already have a renamed_name)
+          local _, existingRenamed = r.TrackFX_GetNamedConfigParm(Track, newContainerIdx, 'renamed_name')
+          if existingRenamed and existingRenamed ~= '' then
+            -- This container was converted, not created new - try creating at the end instead
+            newContainerIdx = AddFX_HideWindow(Track, 'Container', -1)
+            if not newContainerIdx then
+              newContainerIdx = r.TrackFX_GetCount(Track)-1
+            end
+            
+            -- Check again if this one is new
+            local _, existingRenamed2 = r.TrackFX_GetNamedConfigParm(Track, newContainerIdx, 'renamed_name')
+            if existingRenamed2 and existingRenamed2 ~= '' then
+              -- Still converted, can't create new container - clear flag and abort
+              Snd.ContainerCreating = nil
+              return
+            end
+          end
+          
+          -- Double-check the container is actually a Container FX BEFORE setting the name
+          local _, fxNameCheck = r.TrackFX_GetFXName(Track, newContainerIdx)
+          if fxNameCheck ~= 'Container' then
+            -- Not a container, clear flag and abort
+            Snd.ContainerCreating = nil
+            return
+          end
+          
+          -- Set the renamed_name on the new container with the correct pattern
+          r.TrackFX_SetNamedConfigParm(Track, newContainerIdx, 'renamed_name', targetName)
+          
+          -- Set the container immediately to prevent infinite creation
+          Snd.Container = newContainerIdx
+          Snd.ContainerCreating = nil  -- Clear the flag
+          
+          -- Immediately verify the container exists and is valid by index
+          local fxCount = r.TrackFX_GetCount(Track)
+          if newContainerIdx >= 0 and newContainerIdx < fxCount then
+            -- Verify it's actually a Container by checking container_count parameter
+            local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, newContainerIdx, 'container_count')
+            if containerCount then
+              Snd.Container = newContainerIdx
+            end
+          end
+          
+          -- Verify the container can be found by name (this ensures it's properly set)
+          local verifyFound = r.TrackFX_GetByName(Track, targetName, false)
+          if verifyFound and verifyFound >= 0 then
+            -- Double-check it's actually a container with the correct name
+            local _, containerCount = r.TrackFX_GetNamedConfigParm(Track, verifyFound, 'container_count')
+            local _, renamed = r.TrackFX_GetNamedConfigParm(Track, verifyFound, 'renamed_name')
+            if containerCount and renamed == targetName then
+              -- Successfully verified, use the verified index (might be different due to REAPER's internal handling)
+              Snd.Container = verifyFound
+            end
+          end
+          
+          -- Configure the container (do this regardless of verification result)
+          local chan = tonumber( r.GetMediaTrackInfo_Value( Track, 'I_NCHAN'))
+          if chan <= 2 then 
+            r.SetMediaTrackInfo_Value(Track,  'I_NCHAN', 4)
+          end 
+          local pairIndex = FindNextSendFXStereoPair(Track)
+          Set_Out_Channel_To_A_New_Stereo_Channel(Track, Snd.Container, pairIndex)
+          r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2)
         end
 
 
 
         local function PreDelay()
-  im.Text(ctx, 'Pre-delay : ')
-  SL()
+          im.Text(ctx, 'Pre-delay : ')
+          SL()
+          local createdPreDelayFX
 
-  -- Helper converters between JSFX normalized value (0..1) and displayed ms (-100..100)
-  local function NormToMs(v)
-    v = tonumber(v) or 0.5
-    return (v * 200) - 100 -- 0 -> -100ms, 0.5 -> 0ms, 1 -> +100ms
-  end
-  local function MsToNorm(ms)
-    ms = tonumber(ms) or 0
-    local v = (ms + 100) / 200
-    if v < 0 then v = 0 elseif v > 1 then v = 1 end
-    return v
-  end
+          -- Helper converters between JSFX normalized value (0..1) and displayed ms (-100..100)
+          local function NormToMs(v)
+            v = tonumber(v) or 0.5
+            return (v * 200) - 100 -- 0 -> -100ms, 0.5 -> 0ms, 1 -> +100ms
+          end
+          local function MsToNorm(ms)
+            ms = tonumber(ms) or 0
+            local v = (ms + 100) / 200
+            if v < 0 then v = 0 elseif v > 1 then v = 1 end
+            return v
+          end
 
-  local clr
-  if not Snd.HasPreDelay then
-    clr = getClr(im.Col_TextDisabled)
-  end
+          if Snd.PreDelay_Linked == nil then
+            Snd.PreDelay_Linked = true
+          end
 
-  -- Find / cache the JSFX inside the container
-  local id = Check_If_FX_Exist_In_Container(Track, Snd.Container, 'JS: Dual Time adjustment +/- Delay')
-  if not id then
-    -- No JSFX yet; show disabled controls, allow double-click to create
-    Snd.predelay_id = nil
-    Snd.PreDelay_Init = nil
-  else
-    Snd.predelay_id = id
+          local clr
+          if not Snd.HasPreDelay then
+            clr = getClr(im.Col_TextDisabled)
+          end
 
-    -- One-time init of state from current FX parameters
-    if not Snd.PreDelay_Init then
-      -- Left / right delays (params 0 and 1)
-      local pL = r.TrackFX_GetParamNormalized(Track, id, 0)
-      local pR = r.TrackFX_GetParamNormalized(Track, id, 1)
-      Snd.PreDelay_L = NormToMs(pL)
-      Snd.PreDelay_R = NormToMs(pR)
+          -- Find / cache the JSFX inside the container
+          local id = Check_If_FX_Exist_In_Container(Track, Snd.Container, 'JS: Dual Time adjustment +/- Delay')
+          if not id then
+            -- No JSFX yet; show disabled controls, allow double-click to create
+            Snd.predelay_id = nil
+            Snd.PreDelay_Init = nil
+          else
+            Snd.predelay_id = id
 
-      -- Locate "Mode" parameter so link state follows the JSFX
-      if Snd.PreDelay_ModeParamIndex == nil then
-        local numParams = r.TrackFX_GetNumParams(Track, id)
-        for p = 0, (numParams or 0) - 1 do
-          local _, pname = r.TrackFX_GetParamName(Track, id, p)
-          if pname == 'Mode' then
-            Snd.PreDelay_ModeParamIndex = p
-            break
+            -- One-time init of state from current FX parameters
+            if not Snd.PreDelay_Init then
+              -- Left / right delays (params 0 and 1)
+              local pL = r.TrackFX_GetParamNormalized(Track, id, 0)
+              local pR = r.TrackFX_GetParamNormalized(Track, id, 1)
+              Snd.PreDelay_L = NormToMs(pL)
+              Snd.PreDelay_R = NormToMs(pR)
+
+              -- Locate "Mode" parameter so link state follows the JSFX
+              if Snd.PreDelay_ModeParamIndex == nil then
+                local numParams = r.TrackFX_GetNumParams(Track, id)
+                for p = 0, (numParams or 0) - 1 do
+                  local _, pname = r.TrackFX_GetParamName(Track, id, p)
+                  if pname == 'Mode' then
+                    Snd.PreDelay_ModeParamIndex = p
+                    break
+                  end
+                end
+              end
+
+              if Snd.PreDelay_ModeParamIndex ~= nil then
+                local m = r.TrackFX_GetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex)
+                -- JSFX 'Mode' parameter: treat 0.0 as linked, 1.0 as unlinked
+                Snd.PreDelay_Linked = (m or 0) < 0.5
+              else
+                -- Fallback: start linked
+                Snd.PreDelay_Linked = true
+              end
+
+              Snd.PreDelay_Init = true
+            end
+          end
+
+          -- Current UI values in ms
+          Snd.PreDelay_L = Snd.PreDelay_L or 0
+          Snd.PreDelay_R = Snd.PreDelay_R or 0
+
+          -- Draw left delay drag
+          local dragFormat = '%.1f'
+          if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
+          im.PushItemWidth(ctx, 60)
+          local changedL, newL = im.DragDouble(ctx,
+            '##PreDelay_L_' .. (t or '') .. '_' .. (i or 0),
+            Snd.PreDelay_L, 0.13, -100, 100, dragFormat)
+          local leftDragActive = im.IsItemActive(ctx)
+          im.PopItemWidth(ctx)
+          if clr then im.PopStyleColor(ctx) end
+          
+          -- Double-click left drag to reset to 0
+          if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
+            Snd.PreDelay_L = 0
+            if Snd.PreDelay_Linked then
+              Snd.PreDelay_R = 0
+            end
+            changedL = true
+            newL = 0
+          end
+
+          -- Link icon between L/R
+          SL()
+          local linkSize = im.GetTextLineHeight(ctx)
+          local linked = Snd.PreDelay_Linked and true or false
+          local linkTint = linked and 0xffffffff or 0x777777ff
+          if Img and Img.Link then
+            if im.ImageButton(ctx, '##PreDelay_Link_' .. (t or '') .. '_' .. (i or 0),
+              Img.Link, linkSize, linkSize, nil, nil, nil, nil, nil, linkTint) then
+              linked = not linked
+              Snd.PreDelay_Linked = linked
+              -- Push link state into JSFX "Mode" parameter if we found it
+              if id and Snd.PreDelay_ModeParamIndex ~= nil then
+                -- 0.0 = linked, 1.0 = unlinked
+                r.TrackFX_SetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex, linked and 0 or 1)
+              end
+            end
+            if im.IsItemHovered(ctx) then
+              if linked then
+                SetHelpHint('LMB = Unlink L/R pre-delay')
+              else
+                SetHelpHint('LMB = Link L/R pre-delay')
+              end
+            end
+          end
+
+          -- Right delay drag
+          SL()
+          if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
+          im.PushItemWidth(ctx, 60)
+          local changedR, newR = im.DragDouble(ctx,
+            '##PreDelay_R_' .. (t or '') .. '_' .. (i or 0),
+            Snd.PreDelay_R, 0.13, -100, 100, dragFormat)
+          local rightDragActive = im.IsItemActive(ctx)
+          im.PopItemWidth(ctx)
+          if clr then im.PopStyleColor(ctx) end
+          
+          -- Double-click right drag to reset to 0
+          if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
+            Snd.PreDelay_R = 0
+            if Snd.PreDelay_Linked then
+              Snd.PreDelay_L = 0
+            end
+            changedR = true
+            newR = 0
+          end
+
+          -- Show unit label
+          SL()
+          im.Text(ctx, 'ms')
+
+          local function createPreDelayFX()
+            local insertPos = Calc_Container_FX_Index(Track, Snd.Container, 1)
+            local newId = AddFX_HideWindow(Track, 'JS: Dual Time adjustment +/- Delay', insertPos)
+            if newId and newId >= 0 then
+              id = newId
+              createdPreDelayFX = true
+              Snd.predelay_id = newId
+              Snd.PreDelay_Init = nil
+              Snd.PreDelay_ModeParamIndex = nil
+
+              Snd.PreDelay_L = Snd.PreDelay_L or 0
+              Snd.PreDelay_R = Snd.PreDelay_R or 0
+
+              local normL = MsToNorm(Snd.PreDelay_L)
+              local normR = MsToNorm(Snd.PreDelay_R)
+              r.TrackFX_SetParamNormalized(Track, newId, 0, normL)
+              r.TrackFX_SetParamNormalized(Track, newId, 1, normR)
+              Snd.HasPreDelay = true
+            end
+          end
+
+          -- If JSFX doesn't exist yet, create it on drag or double-click
+          if not id then
+            -- Apply local value changes even before the JSFX exists
+            if changedL then
+              Snd.PreDelay_L = newL
+              if Snd.PreDelay_Linked then
+                Snd.PreDelay_R = newL
+              end
+            end
+            if changedR then
+              Snd.PreDelay_R = newR
+              if Snd.PreDelay_Linked then
+                Snd.PreDelay_L = newR
+              end
+            end
+
+            local wantsCreate = changedL or changedR or leftDragActive or rightDragActive
+            if wantsCreate then
+              createPreDelayFX()
+            elseif im.IsItemClicked(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
+              createPreDelayFX()
+            end
+
+            if not id then
+              return
+            end
+          end
+
+          if createdPreDelayFX then
+            changedL = true
+            changedR = true
+            newL = newL or Snd.PreDelay_L or 0
+            newR = newR or Snd.PreDelay_R or 0
+          end
+
+          -- Update internal state from drags
+          local anyChanged = false
+          if changedL then
+            anyChanged = true
+            Snd.PreDelay_L = newL
+            if Snd.PreDelay_Linked then
+              Snd.PreDelay_R = newL
+            end
+          end
+          if changedR then
+            anyChanged = true
+            Snd.PreDelay_R = newR
+            if Snd.PreDelay_Linked then
+              Snd.PreDelay_L = newR
+            end
+          end
+
+          -- Apply to all matching JSFX instances in the container when changed
+          if anyChanged then
+            local normL = MsToNorm(Snd.PreDelay_L)
+            local normR = MsToNorm(Snd.PreDelay_R)
+
+            local _, HowManyFXinContainer = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_count')
+            local HowManyFXinContainer = tonumber(HowManyFXinContainer)
+
+            for ci = 0, (HowManyFXinContainer or 0) - 1 do
+              local _, fxid = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_item.' .. ci)
+              local fxid = tonumber(fxid)
+              local _, nm = r.TrackFX_GetNamedConfigParm(Track, fxid, 'fx_name')
+
+              if nm == 'JS: Dual Time adjustment +/- Delay' then
+                r.TrackFX_SetParamNormalized(Track, fxid, 0, normL)
+                r.TrackFX_SetParamNormalized(Track, fxid, 1, normR)
+                -- Also keep JSFX "Mode" in sync with link state if we found it
+                if Snd.PreDelay_ModeParamIndex ~= nil then
+                  -- Keep JSFX 'Mode' in sync: 0.0 = linked, 1.0 = unlinked
+                  r.TrackFX_SetParamNormalized(Track, fxid, Snd.PreDelay_ModeParamIndex,
+                    Snd.PreDelay_Linked and 0 or 1)
+                end
+              end
+            end
+
+            local PreDelayIdx = Calc_Container_FX_Index(Track, Snd.Container)
+            local pairIndex = GetContainerStereoPairIndex(Track, Snd.Container) or 2
+            r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2) -- align send to container's pair
+            Snd.HasPreDelay = true
           end
         end
-      end
-
-      if Snd.PreDelay_ModeParamIndex ~= nil then
-        local m = r.TrackFX_GetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex)
-        -- JSFX 'Mode' parameter: treat 0.0 as linked, 1.0 as unlinked
-        Snd.PreDelay_Linked = (m or 0) < 0.5
-      else
-        -- Fallback: start linked
-        Snd.PreDelay_Linked = true
-      end
-
-      Snd.PreDelay_Init = true
-    end
-  end
-
-  -- Current UI values in ms
-  Snd.PreDelay_L = Snd.PreDelay_L or 0
-  Snd.PreDelay_R = Snd.PreDelay_R or 0
-
-  -- Draw left delay drag
-  local dragFormat = '%.1f'
-  if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
-  im.PushItemWidth(ctx, 60)
-  local changedL, newL = im.DragDouble(ctx,
-    '##PreDelay_L_' .. (t or '') .. '_' .. (i or 0),
-    Snd.PreDelay_L, 0.13, -100, 100, dragFormat)
-  im.PopItemWidth(ctx)
-  if clr then im.PopStyleColor(ctx) end
-  
-  -- Double-click left drag to reset to 0
-  if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
-    Snd.PreDelay_L = 0
-    if Snd.PreDelay_Linked then
-      Snd.PreDelay_R = 0
-    end
-    changedL = true
-    newL = 0
-  end
-
-  -- Link icon between L/R
-  SL()
-  local linkSize = im.GetTextLineHeight(ctx)
-  local linked = Snd.PreDelay_Linked and true or false
-  local linkTint = linked and 0xffffffff or 0x777777ff
-  if Img and Img.Link then
-    if im.ImageButton(ctx, '##PreDelay_Link_' .. (t or '') .. '_' .. (i or 0),
-      Img.Link, linkSize, linkSize, nil, nil, nil, nil, nil, linkTint) then
-      linked = not linked
-      Snd.PreDelay_Linked = linked
-      -- Push link state into JSFX "Mode" parameter if we found it
-      if id and Snd.PreDelay_ModeParamIndex ~= nil then
-        -- 0.0 = linked, 1.0 = unlinked
-        r.TrackFX_SetParamNormalized(Track, id, Snd.PreDelay_ModeParamIndex, linked and 0 or 1)
-      end
-    end
-    if im.IsItemHovered(ctx) then
-      if linked then
-        SetHelpHint('LMB = Unlink L/R pre-delay')
-      else
-        SetHelpHint('LMB = Link L/R pre-delay')
-      end
-    end
-  end
-
-  -- Right delay drag
-  SL()
-  if clr then im.PushStyleColor(ctx, im.Col_Text, clr) end
-  im.PushItemWidth(ctx, 60)
-  local changedR, newR = im.DragDouble(ctx,
-    '##PreDelay_R_' .. (t or '') .. '_' .. (i or 0),
-    Snd.PreDelay_R, 0.13, -100, 100, dragFormat)
-  im.PopItemWidth(ctx)
-  if clr then im.PopStyleColor(ctx) end
-  
-  -- Double-click right drag to reset to 0
-  if im.IsItemHovered(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
-    Snd.PreDelay_R = 0
-    if Snd.PreDelay_Linked then
-      Snd.PreDelay_L = 0
-    end
-    changedR = true
-    newR = 0
-  end
-
-  -- Show unit label
-  SL()
-  im.Text(ctx, 'ms')
-
-  -- If JSFX doesn't exist yet, allow double-click to create it
-  if not id then
-    if im.IsItemClicked(ctx) and im.IsMouseDoubleClicked(ctx, 0) then
-      Snd.predelay_id = AddFX_HideWindow(Track, 'JS: Dual Time adjustment +/- Delay',
-        Calc_Container_FX_Index(Track, Snd.Container, 1))
-      Snd.PreDelay_Init = nil
-    end
-    return
-  end
-
-  -- Update internal state from drags
-  local anyChanged = false
-  if changedL then
-    anyChanged = true
-    Snd.PreDelay_L = newL
-    if Snd.PreDelay_Linked then
-      Snd.PreDelay_R = newL
-    end
-  end
-  if changedR then
-    anyChanged = true
-    Snd.PreDelay_R = newR
-    if Snd.PreDelay_Linked then
-      Snd.PreDelay_L = newR
-    end
-  end
-
-  -- Apply to all matching JSFX instances in the container when changed
-  if anyChanged then
-    local normL = MsToNorm(Snd.PreDelay_L)
-    local normR = MsToNorm(Snd.PreDelay_R)
-
-    local _, HowManyFXinContainer = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_count')
-    local HowManyFXinContainer = tonumber(HowManyFXinContainer)
-
-    for ci = 0, (HowManyFXinContainer or 0) - 1 do
-      local _, fxid = r.TrackFX_GetNamedConfigParm(Track, Snd.Container, 'container_item.' .. ci)
-      local fxid = tonumber(fxid)
-      local _, nm = r.TrackFX_GetNamedConfigParm(Track, fxid, 'fx_name')
-
-      if nm == 'JS: Dual Time adjustment +/- Delay' then
-        r.TrackFX_SetParamNormalized(Track, fxid, 0, normL)
-        r.TrackFX_SetParamNormalized(Track, fxid, 1, normR)
-        -- Also keep JSFX "Mode" in sync with link state if we found it
-        if Snd.PreDelay_ModeParamIndex ~= nil then
-          -- Keep JSFX 'Mode' in sync: 0.0 = linked, 1.0 = unlinked
-          r.TrackFX_SetParamNormalized(Track, fxid, Snd.PreDelay_ModeParamIndex,
-            Snd.PreDelay_Linked and 0 or 1)
-        end
-      end
-    end
-
-    local PreDelayIdx = Calc_Container_FX_Index(Track, Snd.Container)
-    local pairIndex = GetContainerStereoPairIndex(Track, Snd.Container) or 2
-    r.SetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN', (pairIndex - 1) * 2) -- align send to container's pair
-    Snd.HasPreDelay = true
-  end
-end
-local function AddFX()
+        local function AddFX()
           im.Text(ctx, 'Add FX :     ')
           SL()
           local InsertPos = Calc_Container_FX_Index(Track, Snd.Container)
@@ -2415,24 +2478,34 @@ local function AddFX()
       end
     end
     
-
     local function Volume_Btn ()
       
       -- Calculate volume button width - reduce if pan knobs are enabled
-      local volBtnWidth = SendValSize - SendValW_Ofs + 15  -- Add 15px to make readout wider
+      local volBtnWidth = SendValSize - SendValW_Ofs + 5 - 3  -- Base width for volume readout (reduced by 3px)
+      -- Regular sends (no container) were visually a few px narrower; give them a slight bump
+      if not Snd.Container then
+        volBtnWidth = volBtnWidth + 3
+      end
       if ShowSendPanKnobs then
-        -- Calculate knob size the same way DrawSendPanKnob does, using animated height
-        local animEffectiveH = baseRowH
+        -- Calculate knob size the same way DrawSendPanKnob does, using animated height (matching actual knob height: volBtnH + 3)
+        local animEffectiveH = (volBtnH or baseRowH) + 3
         if animProg and animProg < 1 then
           local effective_p = math.max(0, (animProg - 0.25) / 0.75)
           local scale = 1 - (effective_p * effective_p * effective_p)
-          animEffectiveH = math.max(0.0001, baseRowH * scale)
+          animEffectiveH = math.max(0.0001, ((volBtnH or baseRowH) + 3) * scale)
         end
-        local effectiveHeight = animEffectiveH + 2
+        local effectiveHeight = animEffectiveH
         local knobRadius = (effectiveHeight * 0.5) - 0.5
         if knobRadius < 4 then knobRadius = 4 end
         local knobSize = knobRadius * 2
-        volBtnWidth = volBtnWidth - knobSize - 3  -- Subtract knob size plus extra spacing to prevent overlap
+        -- When there's an FX button (Snd.Container exists), the spacing calculation needs adjustment
+        -- to prevent empty space at the end of the line
+        local spacing = 3
+        if Snd.Container then
+          -- When FX button exists, reduce spacing to match the actual layout
+          spacing = 0
+        end
+        volBtnWidth = volBtnWidth - knobSize - spacing  -- Subtract knob size plus spacing to prevent overlap
       end
       
       -- Draw the send button at current height (add 3px to match volume drag height)
@@ -2462,7 +2535,14 @@ local function AddFX()
       end
       
 
-      if im.IsItemClicked(ctx) and not im.IsPopupOpen(ctx,  'Add FX Window for Send FX' ..tostring(Track)..i) then
+      -- Check if FX button was clicked - if so, don't start volume drag
+      local fxBtnWasClicked = (SendFXBtnClicked or {})['Track' .. t .. 'Send' .. i]
+      if fxBtnWasClicked then
+        -- Clear the flag after checking
+        SendFXBtnClicked['Track' .. t .. 'Send' .. i] = nil
+      end
+      
+      if im.IsItemClicked(ctx) and not im.IsPopupOpen(ctx,  'Add FX Window for Send FX' ..tostring(Track)..i) and not fxBtnWasClicked then
         local currentMods = im.GetKeyMods(ctx)
         if currentMods == Ctrl or (currentMods & Ctrl) ~= 0 then
           -- Ctrl+Left-click: show volume envelope for this send
@@ -2599,26 +2679,81 @@ local function AddFX()
     
 
     local volReadoutHovered = Volume_Btn()
-    
-    -- Clear FX button hover state only if neither FX button nor volume readout is hovered
-    if Snd.HvrOnFXSend and not fxBtnHovered and not volReadoutHovered then
-      Snd.HvrOnFXSend = nil
-    end
-    
+
     -- Add pan knob if enabled in settings
     if ShowSendPanKnobs then
       im.SameLine(ctx, nil, 0)
-      -- Use animated height for pan knob
-      local panKnobH = baseRowH
+      -- Match pan knob height to the volume button height for consistency
+      local panKnobH = (volBtnH or baseRowH) + 3
       local panKnobAlpha = 1.0
       if animProg and animProg < 1 then
         local effective_p = math.max(0, (animProg - 0.25) / 0.75)
         local scale = 1 - (effective_p * effective_p * effective_p)
-        panKnobH = math.max(0.0001, baseRowH * scale)
-        -- Calculate alpha based on delete animation progress
+        panKnobH = math.max(0.0001, ((volBtnH or baseRowH) + 3) * scale)
         panKnobAlpha = math.max(0, 1 - animProg)
       end
-      DrawSendPanKnob(ctx, Track, i, 0, panKnobH+2, 'SendPan_' .. TrkID .. '_' .. i, panKnobAlpha)
+      DrawSendPanKnob(ctx, Track, i, 0, panKnobH, 'SendPan_' .. TrkID .. '_' .. i, panKnobAlpha)
+    end
+
+    -- Draw send icon or FX button at the rightmost position
+    local fxBtnHovered = false
+    if shouldDrawSendIconRight then
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0)
+      im.SameLine(ctx, nil, 0)
+      
+      if Snd.Container then
+        -- Draw FX button when container exists
+        im.PushStyleVar(ctx, im.StyleVar_FramePadding, 2, 0)
+        im.PushFont(ctx, Impact_10)
+        -- shrink FX button height along with the row during delete animation (add 3px to match volume drag height)
+        local fxBtnH = (volBtnH or (SendsLineHeight or 13)) + 3
+        -- center text and compute a safe width to avoid right-side cropping
+        -- vertically nudge slightly upward for better optical centering
+        im.PushStyleVar(ctx, im.StyleVar_ButtonTextAlign, 0 , 0.5)
+        local fxLabel = 'FX'
+        local fxTw, _ = im.CalcTextSize(ctx, fxLabel)
+        local fxBtnW = math.max((SendFXBtnSize or 12), fxTw + 8)
+        local rv = im.Button(ctx, fxLabel .. '##'..t..'  i '..i, fxBtnW, fxBtnH)
+        im.PopStyleVar(ctx)
+        im.PopStyleVar(ctx)
+        im.PopFont(ctx)
+        fxBtnHovered = im.IsItemHovered(ctx)
+        local fxBtnClicked = rv
+        if fxBtnClicked then
+          im.OpenPopup(ctx, 'Add FX Window for Send FX' ..tostring(Track)..i)
+          -- Mark that FX button was clicked to prevent volume drag from capturing the click
+          SendFXBtnClicked = SendFXBtnClicked or {}
+          SendFXBtnClicked['Track' .. t .. 'Send' .. i] = true
+        end
+      else
+        -- Draw send icon when no container exists
+        im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 0)
+        -- Use rowCurH to match the full row height for consistent background coverage
+        -- rowCurH already accounts for delete animation scaling
+        local iconSize = rowCurH
+        local iconWidth = 15  -- Increased from 13 to prevent right-side cropping
+        local baseTint = 0xCCFFFFFF  -- Slightly transparent white for normal state
+        local sendIconClicked = im.ImageButton(ctx, '##SendIcon_'..tostring(t)..'_'..i, Img.Send, iconWidth, iconSize, nil, nil, nil, nil, nil, baseTint)
+        -- Check if hovered and apply bold effect (brighter tint) and show tooltip
+        if im.IsItemHovered(ctx) then
+          local hoverTint = 0xFFFFFFFF  -- Full opacity white for bold effect
+          local L, T = im.GetItemRectMin(ctx)
+          local R, B = im.GetItemRectMax(ctx)
+          im.DrawList_AddImage(WDL, Img.Send, L, T, R, B, nil, nil, nil, nil, hoverTint)
+          im.SetItemTooltip(ctx, 'Add send FX')
+        end
+        -- Handle click - trigger same function as send FX button
+        if sendIconClicked then
+          im.OpenPopup(ctx, 'Add FX Window for Send FX' ..tostring(Track)..i)
+        end
+        im.PopStyleVar(ctx)
+      end
+      im.PopStyleVar(ctx)
+    end
+
+    -- Clear FX button hover state only if neither FX button nor volume readout is hovered
+    if Snd.HvrOnFXSend and not fxBtnHovered and not volReadoutHovered then
+      Snd.HvrOnFXSend = nil
     end
 
     -- Check if volume drag happened for this send (mark it so popup won't open)
@@ -2963,7 +3098,7 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
   local Chan = r.GetTrackSendInfo_Value(Track, -1, i, 'I_DSTCHAN')
   if Chan > 0 then 
     im.Button(ctx,' '..math.ceil(Chan+1)..'-'..math.ceil(Chan+2)..' ')
-    local w, h = HighlightItem(0x00000000,WDL, Clr.Attention)
+    local w, h = HighlightItem(0x00000000,WDL, Clr.ChanBadgeText)
     BtnSizeOffset = BtnSizeOffset - w
     SL()
   end
@@ -3020,29 +3155,38 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
   local rRowMinX, rRowMinY = im.GetCursorScreenPos(ctx)
   local rRowMaxX = rRowMinX + (Send_W or 0)
   local rRowMaxY = rRowMinY + (SendsLineHeight or 14)
-  -- compute current animated height for this receive row
-  local rBaseH = (SendsLineHeight or 14)
+  -- compute current animated height for this receive row (matching send row calculation)
+  local lineH = im.GetTextLineHeight(ctx)
+  local rBaseH = (SendsLineHeight or lineH or 14)
+  local rNameBtnBaseH = (lineH + 3)
+  local rVolBtnBaseH = (SendsLineHeight or lineH or 14)
   local rKey do
     local srcGUID = (SrcTrack and r.ValidatePtr2(0, SrcTrack, 'MediaTrack*')) and r.GetTrackGUID(SrcTrack) or ('invalid_recv_' .. i)
     rKey = MakeRecvKey(Track, srcGUID, i)
   end
   local rAnim = ReceiveDeleteAnim and ReceiveDeleteAnim[rKey]
   local rCreateAnim = ReceiveCreateAnim and ReceiveCreateAnim[rKey]
+  local rNameBtnH = rNameBtnBaseH
+  local rVolBtnH = rVolBtnBaseH
   local rCurH = rBaseH
   if rAnim and (rAnim.progress or 0) < 1 then
     local p = rAnim.progress or 0
     local effective_p = math.max(0, (p - 0.25) / 0.75)
     local scale = 1 - (effective_p * effective_p * effective_p)
-    rCurH = math.max(0.0001, rBaseH * scale)
+    rNameBtnH = math.max(0.0001, rNameBtnBaseH * scale)
+    rVolBtnH = math.max(0.0001, rVolBtnBaseH * scale)
+    rCurH = math.max(rNameBtnH, rVolBtnH)
     -- Push alpha style var to fade content to transparent
     local recvAlpha = math.max(0, 1 - p)
     im.PushStyleVar(ctx, im.StyleVar_Alpha, recvAlpha)
     pushedRecvAlpha = true
+  else
+    rCurH = math.max(rNameBtnH, rVolBtnH)
   end
   -- cache row start so we can draw full-width overlay even after more items
   rRowMinX_cached, rRowMinY_cached = rRowMinX, rRowMinY
-  -- draw name button with current height
-  local RecvNameClick = im.Button(ctx, RecvName .. '##'..i, BtnSize + BtnSizeOffset, rCurH)
+  -- draw name button with current height (matching send name button height)
+  local RecvNameClick = im.Button(ctx, RecvName .. '##'..i, BtnSize + BtnSizeOffset, rNameBtnH)
   
   -- Apply creation animation (flash/fade-in)
   if rCreateAnim and (rCreateAnim.progress or 0) < 1 then
@@ -3433,9 +3577,12 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
     local CurX, CurY = im.GetCursorScreenPos(ctx)
     
     im.PushStyleVar(ctx, im.StyleVar_ButtonTextAlign, 1, 1)
-    -- compute and apply current row height if animating
+    -- compute and apply current row height if animating (matching send row calculation)
     local rMinX, rMinY = rRowMinX or im.GetItemRectMin(ctx)
-    local rBaseH = (SendsLineHeight or 14)
+    local lineH = im.GetTextLineHeight(ctx)
+    local rBaseH = (SendsLineHeight or lineH or 14)
+    local rNameBtnBaseH = (lineH + 3)
+    local rVolBtnBaseH = (SendsLineHeight or lineH or 14)
     
     local rKey
     do
@@ -3443,18 +3590,22 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
       rKey = MakeRecvKey(Track, srcGUID, i)
     end
     local rAnim = ReceiveDeleteAnim and ReceiveDeleteAnim[rKey]
-    local rCurH = rBaseH
+    local rNameBtnH = rNameBtnBaseH
+    local rVolBtnH = rVolBtnBaseH
+    local rCurH = math.max(rNameBtnH, rVolBtnH)
     if rAnim and (rAnim.progress or 0) < 1 then
       local p = rAnim.progress or 0
       local effective_p = math.max(0, (p - 0.25) / 0.75)
       local scale = 1 - (effective_p * effective_p * effective_p)
-      rCurH = math.max(0.0001, rBaseH * scale)
+      rNameBtnH = math.max(0.0001, rNameBtnBaseH * scale)
+      rVolBtnH = math.max(0.0001, rVolBtnBaseH * scale)
+      rCurH = math.max(rNameBtnH, rVolBtnH)
     end
     
     -- Calculate pan knob offset to prevent overlap with volume readout (using animated height)
     local recvPanKnobOffset = 0
     if ShowSendPanKnobs then
-      local effectiveHeight = rCurH + 2
+      local effectiveHeight = (rVolBtnH or rBaseH) + 3
       local knobRadius = (effectiveHeight * 0.5) - 0.5
       if knobRadius < 4 then knobRadius = 4 end
       local knobSize = knobRadius * 2
@@ -3462,18 +3613,18 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
     end
     
     -- Calculate receive volume button width - reduce if pan knobs are enabled
-    local recvVolBtnWidth = SendValSize + 15  -- Add 15px to make readout wider
+    local recvVolBtnWidth = SendValSize + 10 - 3  -- Add 10px to make readout wider, then reduce by 3px
     if ShowSendPanKnobs then
-      -- Calculate knob size the same way DrawSendPanKnob does, using animated height
-      local effectiveHeight = rCurH + 2
+      -- Calculate knob size the same way DrawSendPanKnob does, using animated height (matching actual knob height: rVolBtnH + 3)
+      local effectiveHeight = (rVolBtnH or rBaseH) + 3
       local knobRadius = (effectiveHeight * 0.5) - 0.5
       if knobRadius < 4 then knobRadius = 4 end
       local knobSize = knobRadius * 2
       recvVolBtnWidth = recvVolBtnWidth - knobSize - 4  -- Subtract knob size plus extra spacing to prevent overlap
     end
     
-    -- Add 3px to match volume drag height
-    local recvVolReadoutH = rCurH 
+    -- Add 3px to match volume drag height (same as send volume readout: volBtnH + 3)
+    local recvVolReadoutH = (rVolBtnH or rBaseH) + 3
     im.Button(ctx, ShownVol .. '##Recv', recvVolBtnWidth, recvVolReadoutH)
     if im.IsItemHovered(ctx) then
       SetHelpHint('LMB Drag = Adjust Receive Volume', 'Shift+Drag = Fine Adjustment', 'Alt+LMB = Remove Receive')
@@ -3482,13 +3633,17 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
     
     -- Add pan knob at the rightmost position if enabled in settings
     if ShowSendPanKnobs then
-      im.SameLine(ctx, nil, 2)
-      -- Use animated height for pan knob and calculate alpha for delete animation
+      im.SameLine(ctx, nil, 0)
+      -- Match pan knob height to the receive volume button height for consistency (same as sends: volBtnH + 3)
+      local panKnobH = (rVolBtnH or rBaseH) + 3
       local panKnobAlpha = 1.0
       if rAnim and (rAnim.progress or 0) < 1 then
+        local effective_p = math.max(0, ((rAnim.progress or 0) - 0.25) / 0.75)
+        local scale = 1 - (effective_p * effective_p * effective_p)
+        panKnobH = math.max(0.0001, ((rVolBtnH or rBaseH) + 3) * scale)
         panKnobAlpha = math.max(0, 1 - (rAnim.progress or 0))
       end
-      DrawSendPanKnob(ctx, Track, i, -1, rCurH+2, 'RecvPan_' .. TrkID .. '_' .. i, panKnobAlpha)
+      DrawSendPanKnob(ctx, Track, i, -1, panKnobH, 'RecvPan_' .. TrkID .. '_' .. i, panKnobAlpha)
     end
 
 
@@ -3515,13 +3670,27 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
 
         --local w, h = HighlightItem(0x00000000,WDL, 0xffffffff)
         BtnSizeOffset = BtnSizeOffset - w
-
-      else
-        -- vertically squash receive icon to match current row height (add 3px to match volume drag height)
-        local scaleY = math.max(0.0001, rCurH / rBaseH)
-        local iconH = rBaseH + 3
-        im.DrawList_AddImage(WDL, Img.Recv, CurX - recvPanKnobOffset, CurY, CurX - recvPanKnobOffset + iconH, CurY + iconH * scaleY)
       end
+      
+      -- Draw receive icon at the rightmost position (always shown, even with channel badges)
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0)
+      im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 0)
+      im.SameLine(ctx, nil, 0)
+      -- Use rCurH to match the full row height for consistent background coverage
+      -- rCurH already accounts for delete animation scaling
+      local iconSize = rCurH
+      local iconWidth = 15  -- Same width as send icon to prevent right-side cropping
+      local baseTint = 0xCCFFFFFF  -- Slightly transparent white for normal state
+      local recvIconClicked = im.ImageButton(ctx, '##RecvIcon_'..tostring(t)..'_'..i, Img.Recv, iconWidth, iconSize, nil, nil, nil, nil, nil, baseTint)
+      -- Check if hovered and apply bold effect (brighter tint) and show tooltip
+      if im.IsItemHovered(ctx) then
+        local hoverTint = 0xFFFFFFFF  -- Full opacity white for bold effect
+        local L, T = im.GetItemRectMin(ctx)
+        local R, B = im.GetItemRectMax(ctx)
+        im.DrawList_AddImage(WDL, Img.Recv, L, T, R, B, nil, nil, nil, nil, hoverTint)
+        im.SetItemTooltip(ctx, 'Receive')
+      end
+      im.PopStyleVar(ctx, 2)
     end
 
 
@@ -4036,7 +4205,7 @@ function Sends_List(ctx, t, HeightOfs, T)
     -- Global per-frame flag to detect if any send/recv was hovered in this child
     SENDS_HOVER_THIS_FRAME = false
     
-    BtnSize = Send_W - SendValSize - 20 - (WetDryKnobSz or 7)  -- Decrease volume drag width by wetdry knob size
+    BtnSize = Send_W - SendValSize - 25 - (WetDryKnobSz or 7)  -- Decrease volume drag width by wetdry knob size
     Send_Drag_Prev = Send_Drag_Prev or {}
     
     

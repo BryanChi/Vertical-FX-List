@@ -584,7 +584,56 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     im.PushFont(ctx, andaleMonoFont)
 
     local retval,  renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
-    if renamed~='' then ShownName = renamed .. ' ('.. ShownName..')' end 
+    if renamed~='' then 
+      -- Check if this is a send FX container (pattern: "Send FX for {srcGUID}##{destGUID}")
+      -- Extract destination GUID (the one after ##)
+      local destGUIDWithBraces = renamed:match('##({[^}]+})$')
+      if destGUIDWithBraces then
+        -- Try with and without braces (Reaper GUIDs usually include braces)
+        local destGUID_with_braces = destGUIDWithBraces
+        local destGUID = destGUIDWithBraces:gsub('[{}]', '')
+        -- Get the destination track by GUID (try cached function first, then fallback to direct search)
+        local destTrack = nil
+        if GetTrackByGUIDCached then
+          destTrack = GetTrackByGUIDCached(destGUID_with_braces) or GetTrackByGUIDCached(destGUID)
+        end
+        -- Fallback: search tracks directly if cached lookup failed or function not available
+        if not destTrack then
+          local master = r.GetMasterTrack(0)
+          if master and (r.GetTrackGUID(master) == destGUID_with_braces or r.GetTrackGUID(master) == destGUID) then
+            destTrack = master
+          else
+            local trackCount = r.CountTracks(0) or 0
+            for i = 0, trackCount - 1 do
+              local tr = r.GetTrack(0, i)
+              if tr then
+                local guid = r.GetTrackGUID(tr)
+                if guid == destGUID_with_braces or guid == destGUID then
+                  destTrack = tr
+                  break
+                end
+              end
+            end
+          end
+        end
+        if destTrack then
+          local _, destTrackName = r.GetSetMediaTrackInfo_String(destTrack, 'P_NAME', '', false)
+          if destTrackName and destTrackName ~= '' then
+            -- Display as "Send FX for Track Name" (destination track name)
+            ShownName = 'Send FX for ' .. destTrackName
+          else
+            -- Fallback to original name if track name not available
+            ShownName = renamed .. ' ('.. ShownName..')'
+          end
+        else
+          -- Fallback if track not found
+          ShownName = renamed .. ' ('.. ShownName..')'
+        end
+      else
+        -- Not a send FX container, use normal display
+        ShownName = renamed .. ' ('.. ShownName..')'
+      end
+    end 
     if CheckIf_FX_Special(Track,fx) then  
       ShownName = ''
     end

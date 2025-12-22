@@ -1,3 +1,14 @@
+-- @name FXD - Vertical FX List
+-- @author Bryan Chi
+-- @version 1.0
+-- @about Vertical FX List - A comprehensive vertical FX chain interface for REAPER, visit www.coolreaperscripts.com for details
+-- @provides
+--   [main] FXD_Vertical FX list.lua
+--   [nomain] style_presets_FACTORY.lua
+--   [nomain] fx_favorites.txt
+--   [nomain] Vertical FX List Resources/**
+
+
 local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
@@ -6,8 +17,6 @@ local FunctionFolder = r.GetResourcePath() ..
     '/Scripts/ReaTeam Scripts/Tracks Properties/bryanchi_FXD - Vertical FX List/Functions/'
 
 dofile(FunctionFolder .. 'General functions.lua')
-dofile(FunctionFolder .. 'FX Adder.lua')
-
 --[[ arrange_hwnd  = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 0x3E8) -- client position
 
 _, Top_Arrang = reaper.JS_Window_ClientToScreen(arrange_hwnd, 0, 0)         -- convert to screen position (where clients x,y is actually on the screen)
@@ -322,7 +331,7 @@ local OPEN_SECTION = 'FXD_Vertical_FX_List'
 local OPEN_KEY     = 'OPEN'
 
 local function_folder = r.GetResourcePath() ..
-'/Scripts/BRYAN\'s SCRIPTS/Vertical FX List Resources/Functions/'
+'/Vertical FX List/Vertical FX List Resources/Functions/'
 dofile(function_folder..'FX Buttons.lua')
 dofile(function_folder..'Sends.lua')
 
@@ -1048,6 +1057,23 @@ function ThirdPartyDeps()
     -- FX BROWSER
     if reaper.file_exists(fx_browser) then
         dofile(fx_browser)
+        -- Check if Filter_actions was loaded, if not provide a fallback
+        if not Filter_actions then
+            -- Fallback Filter_actions function if external script doesn't provide it
+            Filter_actions = function(filter_text)
+                if not FX_LIST or #FX_LIST == 0 then return {} end
+                if not filter_text or filter_text == '' then return FX_LIST end
+                
+                local filtered = {}
+                local filter_lower = filter_text:lower()
+                for _, fx_name in ipairs(FX_LIST) do
+                    if fx_name:lower():find(filter_lower, 1, true) then
+                        table.insert(filtered, fx_name)
+                    end
+                end
+                return filtered
+            end
+        end
     else
        reaper.ShowMessageBox("Sexan FX BROWSER is needed.\nPlease Install it in next window", "MISSING DEPENDENCIES", 0)
        reaper.ReaPack_BrowsePackages(fx_browser_reapack)
@@ -1296,6 +1322,99 @@ local function LoadCategoryCache()
   return false
 end
 
+-- Get path for plugin counts file
+local function GetPluginCountsPath()
+  -- Try to get script directory first (for ReaPack compatibility)
+  local script_path = debug.getinfo(1, "S").source
+  if script_path and script_path:sub(1, 1) == "@" then
+    script_path = script_path:sub(2) -- Remove the @ prefix
+  end
+  
+  if script_path then
+    local script_dir
+    if script_path:match("^[/\\]") or script_path:match("^[A-Za-z]:[/\\]") then
+      -- Absolute path
+      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
+    else
+      -- Relative path
+      script_path = r.GetResourcePath() .. "/" .. script_path
+      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
+    end
+    
+    if script_dir then
+      -- Ensure trailing slash
+      if not script_dir:match("[/\\]$") then
+        script_dir = script_dir .. "/"
+      end
+      return script_dir .. "Vertical FX List Resources/plugin_select_counts.txt"
+    end
+  end
+  
+  -- Fallback to old path
+  return r.GetResourcePath() .. "/Scripts/BRYAN's SCRIPTS/Vertical FX List Resources/plugin_select_counts.txt"
+end
+
+-- Load plugin counts from file
+local function LoadPluginCounts()
+  SelectionCounts = SelectionCounts or {}
+  local counts_path = GetPluginCountsPath()
+  
+  local file = io.open(counts_path, 'r')
+  if not file then
+    -- File doesn't exist, that's okay - start with empty counts
+    return
+  end
+  
+  for line in file:lines() do
+    -- Format: PluginName\tCount
+    local name, count = line:match("^(.+)\t(%d+)$")
+    if name and count then
+      SelectionCounts[name] = tonumber(count)
+    end
+  end
+  
+  file:close()
+end
+
+-- Save plugin counts to file
+function SavePluginCounts()
+  if not SelectionCounts or not next(SelectionCounts) then
+    return -- Nothing to save
+  end
+  
+  local counts_path = GetPluginCountsPath()
+  
+  -- Ensure directory exists
+  local dir_path = counts_path:match('^(.+)/[^/]+$')
+  if dir_path then
+    r.RecursiveCreateDirectory(dir_path, 0)
+  end
+  
+  local file = io.open(counts_path, 'w')
+  if not file then
+    return -- Failed to open file for writing
+  end
+  
+  -- Sort by count (descending) then by name for consistent output
+  local sorted = {}
+  for name, count in pairs(SelectionCounts) do
+    table.insert(sorted, {name = name, count = count})
+  end
+  table.sort(sorted, function(a, b)
+    if a.count ~= b.count then
+      return a.count > b.count
+    end
+    return a.name < b.name
+  end)
+  
+  -- Write each entry in format: PluginName\tCount
+  for _, entry in ipairs(sorted) do
+    file:write(entry.name .. "\t" .. tostring(entry.count) .. "\n")
+  end
+  
+  file:close()
+end
+
 -- Build direct lookup from FX_LIST names to categories (called after FX_LIST is loaded)
 local function BuildFXListCategoryLookup()
   if not FX_LIST or #FX_LIST == 0 then return end
@@ -1406,6 +1525,8 @@ do
       CAT = cat or CAT
       -- Try to load category cache from file (fast, no rebuilding needed)
       LoadCategoryCache()
+      -- Load plugin usage counts
+      LoadPluginCounts()
     end
   end
 end
@@ -2158,21 +2279,32 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
     if SpaceIsBeforeRackMixer == 'End of PreFX' then FX_Idx = FX_Idx + 1 end
 
     SelectionCounts = SelectionCounts or {}
-    -- When inserting at the end of chain, always use the actual track FX count
-    -- This is critical when containers with nested FX are present, especially when uncollapsed
-    -- r.TrackFX_GetCount returns the count of top-level FX slots (containers count as 1 slot)
-    -- Nested FX inside containers are not counted in the top-level count
-    -- Get fresh track FX count to avoid issues with modified global FX_Ct variable
-    local trackFXCount = r.TrackFX_GetCount(LT_Track)
+    
+    -- Check if FX_Idx is a container insertion index (>= 0x2000000)
+    -- Container insertion indices are special values returned by Calc_Container_FX_Index
+    local isContainerInsertion = (FX_Idx and FX_Idx >= 0x2000000)
     local insertPosition
     
-    -- When inserting at the end (FX_Idx >= trackFXCount), use -1 to append to end
-    -- This ensures correct insertion position even when containers are uncollapsed and nested FX are visible
-    -- Using -1 is more reliable than -1000 - count when containers are present
-    if FX_Idx >= trackFXCount then
-      insertPosition = -1  -- Append to end
+    if isContainerInsertion then
+      -- Use the container insertion index directly
+      insertPosition = FX_Idx
     else
-      insertPosition = -1000 - FX_Idx  -- Insert before FX at FX_Idx
+      -- Standard track FX insertion
+      -- When inserting at the end of chain, always use the actual track FX count
+      -- This is critical when containers with nested FX are present, especially when uncollapsed
+      -- r.TrackFX_GetCount returns the count of top-level FX slots (containers count as 1 slot)
+      -- Nested FX inside containers are not counted in the top-level count
+      -- Get fresh track FX count to avoid issues with modified global FX_Ct variable
+      local trackFXCount = r.TrackFX_GetCount(LT_Track)
+      
+      -- When inserting at the end (FX_Idx >= trackFXCount), use -1 to append to end
+      -- This ensures correct insertion position even when containers are uncollapsed and nested FX are visible
+      -- Using -1 is more reliable than -1000 - count when containers are present
+      if FX_Idx >= trackFXCount then
+        insertPosition = -1  -- Append to end
+      else
+        insertPosition = -1000 - FX_Idx  -- Insert before FX at FX_Idx
+      end
     end
     
     local fx = r.TrackFX_AddByName(LT_Track, Name, false, insertPosition)
@@ -2543,6 +2675,24 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
         base_filter_text = '' -- Clear base filter when using cat: prefix
       end
     end
+  end
+  
+  -- Ensure Filter_actions exists before calling it
+  if not Filter_actions then
+      -- Fallback if Filter_actions wasn't loaded
+      Filter_actions = function(filter_text)
+          if not FX_LIST or #FX_LIST == 0 then return {} end
+          if not filter_text or filter_text == '' then return FX_LIST end
+          
+          local filtered = {}
+          local filter_lower = filter_text:lower()
+          for _, fx_name in ipairs(FX_LIST) do
+              if fx_name:lower():find(filter_lower, 1, true) then
+                  table.insert(filtered, fx_name)
+              end
+          end
+          return filtered
+      end
   end
   
   local base_filtered_fx = Filter_actions(base_filter_text)
@@ -3186,6 +3336,8 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
               local fx_start_index = match_row_start
               if FX_Search_Cache and FX_Search_Cache.items then
                   for i = 1, #FX_Search_Cache.items do
+                      -- Safety check: ensure cache still exists before accessing
+                      if not FX_Search_Cache or not FX_Search_Cache.items then break end
                       local cached = FX_Search_Cache.items[i]
                       if not cached then break end
                   
@@ -3217,6 +3369,7 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
                           FX_Search_Section = 'regular'
                       end
                       close = true
+                      break -- Exit loop since cache is cleared
                   end
                   
                   if im.IsItemActive(ctx) and im.IsMouseDragging(ctx, 0) then
@@ -5062,10 +5215,7 @@ local function ShowStyleEditor()
     }
   end
 
-  im.PushItemWidth(ctx, im.GetWindowWidth(ctx) * 0.50)
-
-  -- FX List Colors (always visible)
-  -- Bring the Style Editor "Colors" tab UI directly into the Style Editor section
+  -- Initialize color filter if needed
   if not OPEN.style_editor.colors then
     OPEN.style_editor.colors = {
       filter = im.CreateTextFilter(),
@@ -5073,46 +5223,49 @@ local function ShowStyleEditor()
     }
     im.Attach(ctx, OPEN.style_editor.colors.filter)
   end
-  im.PushFont(ctx, Font_Andale_Mono_14)
 
-  im.SeparatorText(ctx, 'All Colors')
+  -- Header with title and filter
+  im.PushFont(ctx, Font_Andale_Mono_14)
+  im.SeparatorText(ctx, '🎨 Color Customization')
   im.PopFont(ctx)
-  -- Filter input with placeholder
+
+  -- Filter input with improved styling
   OPEN.style_editor.colors.filter_text = OPEN.style_editor.colors.filter_text or ''
-  do
-    im.PushStyleVar(ctx, im.StyleVar_FramePadding, 6, 6)
-    im.PushStyleColor(ctx, im.Col_Button, getClr(im.Col_Button))
-    im.PushStyleColor(ctx, im.Col_ButtonActive, getClr(im.Col_Button))
-    im.PushStyleColor(ctx, im.Col_ButtonHovered, getClr(im.Col_Button))
-    -- Leading icon as image button
-    local ln = im.GetTextLineHeight(ctx)
-    local iconSz = ln 
-    im.PushFont(ctx, Font_Andale_Mono_13)
-    if Img and Img.Search then
-      im.ImageButton(ctx, '##FilterIcon', Img.Search, iconSz, iconSz)
-    end
-    im.PopStyleColor(ctx,3)
-    im.SameLine(ctx, nil, 0)
-    im.PushItemWidth(ctx, 460)
-          -- Set cursor color to bright cyan for better visibility
-          im.PushStyleColor(ctx, r.ImGui_Col_InputTextCursor(), 0x00ffffff)
-          WithTypingGuard(function()
-            local changed, txt = im.InputText(ctx, '##ColorFilter', OPEN.style_editor.colors.filter_text or '', 256)
-            if changed then OPEN.style_editor.colors.filter_text = txt end
-          end)
-          im.PopStyleColor(ctx, 1)
-    local L, T = im.GetItemRectMin(ctx)
-    local R, B = im.GetItemRectMax(ctx)
-    local dl = im.GetWindowDrawList(ctx)
-    local colDim = getClr(im.Col_TextDisabled)
-    if (OPEN.style_editor.colors.filter_text or '') == '' and not im.IsItemActive(ctx) then
-      im.DrawList_AddText(dl, L + 4, T + 2, colDim, 'type here to filter colors')
-    end
-    im.PopFont(ctx)
-    im.PopStyleVar(ctx)
-    im.PopItemWidth(ctx)
+  im.PushStyleVar(ctx, im.StyleVar_FramePadding, 8, 6)
+  im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 4)
+
+  -- Search icon and input field
+  local ln = im.GetTextLineHeight(ctx)
+  local iconSz = ln - 2
+
+  if Img and Img.Search then
+    im.Image(ctx, Img.Search, iconSz, iconSz)
+    im.SameLine(ctx, 0, 8)
   end
 
+  im.PushItemWidth(ctx, -1)
+  im.PushStyleColor(ctx, r.ImGui_Col_InputTextCursor(), 0x00ffffff)
+  WithTypingGuard(function()
+    local changed, txt = im.InputText(ctx, '##ColorFilter', OPEN.style_editor.colors.filter_text or '', 256)
+    if changed then OPEN.style_editor.colors.filter_text = txt end
+  end)
+  im.PopStyleColor(ctx, 1)
+
+  -- Placeholder text
+  local L, T = im.GetItemRectMin(ctx)
+  local R, B = im.GetItemRectMax(ctx)
+  local dl = im.GetWindowDrawList(ctx)
+  local colDim = getClr(im.Col_TextDisabled)
+  if (OPEN.style_editor.colors.filter_text or '') == '' and not im.IsItemActive(ctx) then
+    local placeholder = '🔍 Search colors...'
+    im.DrawList_AddText(dl, L + 8, T + 3, colDim, placeholder)
+  end
+  im.PopItemWidth(ctx)
+  im.PopStyleVar(ctx, 2)
+
+  -- Border style checkboxes
+  im.Spacing(ctx)
+  im.SeparatorText(ctx, 'Border Styles')
   local borders = { 'WindowBorder', 'FrameBorder', 'PopupBorder' }
   for i, name in ipairs(borders) do
     local var = im[('StyleVar_%sSize'):format(name)]
@@ -5123,209 +5276,235 @@ local function ShowStyleEditor()
       OPEN.style_editor.style.vars[var] = cur
     end
     local enable = (cur or 0) > 0
-    if i > 1 then im.SameLine(ctx) end
+    if i > 1 then im.SameLine(ctx, 0, 20) end
     rv, enable = im.Checkbox(ctx, name, enable)
     if rv then OPEN.style_editor.style.vars[var] = enable and 1 or 0 end
+  end
+  im.SameLine(ctx, 0, 20)
+  HelpMarker('Enable/disable borders around UI elements')
+
+  -- Color sections in scrollable child
+  im.Spacing(ctx)
+  im.SetNextWindowSizeConstraints(ctx, 0.0, im.GetTextLineHeightWithSpacing(ctx) * 8, 999999, 999999)
+  if im.BeginChild(ctx, '##colors_child', 0, 0, im.ChildFlags_Border | im.ChildFlags_NavFlattened,
+      im.WindowFlags_AlwaysVerticalScrollbar) then
+
+    -- FX List Colors section
+    local fx_entries = {
+      -- Interface Elements
+      { 'FX Buttons', 'Buttons' },
+      { 'VSTi Buttons', 'VSTi' },
+      { 'Send Buttons', 'Send' },
+      { 'Receive Buttons', 'ReceiveSend' },
+
+      -- Selection & Outlines
+      { 'Selection Outline', 'SelectionOutline' },
+      { 'Track Boundaries', 'TrackBoundaryLine' },
+      { 'Pane Separators', 'PaneSeparator' },
+
+      -- Highlights & Effects
+      { 'Highlight Fill', 'GenericHighlightFill' },
+      { 'Highlight Outline', 'GenericHighlightOutline' },
+      { 'Patch Lines', 'PatchLine' },
+      { 'FX Links', 'LinkCable' },
+
+      -- Overlays & Previews
+      { 'Sends Preview', 'SendsPreview' },
+      { 'Snapshot Overlay', 'SnapshotOverlay' },
+      { 'Pan Text Overlay', 'PanTextOverlay' },
+
+      -- Special States
+      { 'Danger (Red)', 'Danger' },
+      { 'Attention (Yellow)', 'Attention' },
+      { 'Menu Hover', 'MenuHover' },
+
+      -- Channel & Controls
+      { 'Channel Badge BG', 'ChanBadgeBg' },
+      { 'Channel Badge Text', 'ChanBadgeText' },
+      { 'Pan Slider Fill', 'PanSliderFill' },
+      { 'Value Rect Fill', 'ValueRect' },
+
+      -- Hidden Elements
+      { 'Hidden Parent Outline', 'HiddenParentOutline' },
+      { 'Hidden Parent Hover', 'HiddenParentHover' },
+    }
+
+    -- Apply filter and organize colors
+    local filtered_entries = {}
+    local f = (OPEN.style_editor.colors.filter_text or ''):lower()
+    if f ~= '' then
+      for _, entry in ipairs(fx_entries) do
+        if entry[1]:lower():find(f, 1, true) or entry[2]:lower():find(f, 1, true) then
+          table.insert(filtered_entries, entry)
+        end
+      end
+    else
+      filtered_entries = fx_entries
     end
-    im.SameLine(ctx)
-    HelpMarker('In the color list:\nLeft-click on color square to open color picker,\nRight-click to open edit options menu.')
 
-    im.SetNextWindowSizeConstraints(ctx, 0.0, im.GetTextLineHeightWithSpacing(ctx) * 10, 999999, 999999)
-    if im.BeginChild(ctx, '##colors_fxlist_header', 0, 0, im.ChildFlags_Border | im.ChildFlags_NavFlattened,
-        im.WindowFlags_AlwaysVerticalScrollbar | im.WindowFlags_AlwaysHorizontalScrollbar) then
-      im.PushItemWidth(ctx, im.GetFontSize(ctx) * -12)
-      local inner_spacing = im.GetStyleVar(ctx, im.StyleVar_ItemInnerSpacing)
+    if #filtered_entries > 0 then
+      im.PushFont(ctx, Font_Andale_Mono_14)
+      im.SeparatorText(ctx, '🎛️ FX List Colors')
+      im.PopFont(ctx)
 
-      -- FX List element-specific colors (filterable)
-      do
-        local fx_entries = {
-          { 'FX Button (Default)', 'Buttons' },
-          { 'VSTi Button (Default)', 'VSTi' },
-          { 'Send Button', 'Send' },
-          { 'Receive Button', 'ReceiveSend' },
-          { 'Selection Outline', 'SelectionOutline' },
-          { 'Pane Separator', 'PaneSeparator' },
-          { 'Track Boundary Line', 'TrackBoundaryLine' },
-          { 'Highlight Fill', 'GenericHighlightFill' },
-          { 'Highlight Outline', 'GenericHighlightOutline' },
-          { 'Patch Line', 'PatchLine' },
-          { 'Sends Preview', 'SendsPreview' },
-          { 'Snapshot Overlay', 'SnapshotOverlay' },
-          { 'Danger Red', 'Danger' },
-          { 'Attention Yellow', 'Attention' },
-          { 'Channel Badge BG', 'ChanBadgeBg' },
-          { 'Channel Badge Text', 'ChanBadgeText' },
-          { 'Pan Text Overlay', 'PanTextOverlay' },
-          { 'Pan Slider Fill', 'PanSliderFill' },
-          { 'Value Rect (Vol/Pan fill)', 'ValueRect' },
-          { 'FX Link', 'LinkCable' },
-          { 'Hidden Parent Outline', 'HiddenParentOutline' },
-          { 'Hidden Parent Hover', 'HiddenParentHover' },
-          { 'Menu Button Hover', 'MenuHover' },
-          { 'Menu Bar Button', 'MenuBarButton' },
-        }
-        im.SeparatorText(ctx, 'FX List Colors')
-        for _, entry in ipairs(fx_entries) do
-          local label, key = entry[1], entry[2]
-        local f = (OPEN.style_editor.colors.filter_text or ''):lower()
-        if f == '' or label:lower():find(f, 1, true) then
-            im.PushID(ctx, key)
-            local cur = Clr[key] or 0xffffffff
-          local rv, newCol = im.ColorEdit4(ctx, '##color', cur, im.ColorEditFlags_AlphaBar)
-            if rv then Clr[key] = newCol end
-            im.SameLine(ctx, 0.0, inner_spacing)
-            im.Text(ctx, label)
-            im.PopID(ctx)
-          end
-        end
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 8, 6)
+      im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 3)
+
+      for _, entry in ipairs(filtered_entries) do
+        local label, key = entry[1], entry[2]
+        im.PushID(ctx, key)
+        local cur = Clr[key] or 0xffffffff
+        local rv, newCol = im.ColorEdit4(ctx, '##color', cur, im.ColorEditFlags_AlphaBar | im.ColorEditFlags_NoInputs)
+        if rv then Clr[key] = newCol end
+        im.SameLine(ctx, 0, 12)
+        im.Text(ctx, label)
+        im.PopID(ctx)
       end
 
-      -- ImGui style colors (original Colors tab content)
-      im.SeparatorText(ctx, 'ImGui Style Colors')
-      for _, color_data in EachColor() do
-        local i, name = color_data[1], color_data[2]
-      local f2 = (OPEN.style_editor.colors.filter_text or ''):lower()
+      im.PopStyleVar(ctx, 2)
+    end
+
+    -- ImGui Style Colors section
+    local imgui_colors = {}
+    local f2 = (OPEN.style_editor.colors.filter_text or ''):lower()
+    for _, color_data in EachColor() do
+      local i, name = color_data[1], color_data[2]
       if f2 == '' or name:lower():find(f2, 1, true) then
-          im.PushID(ctx, i)
-          if im.Button(ctx, '?') then
-            im.DebugFlashStyleColor(ctx, i)
-          end
-          im.SetItemTooltip(ctx, 'Flash given color to identify places where it is used.')
-          im.SameLine(ctx)
-        rv, OPEN.style_editor.style.colors[i] = im.ColorEdit4(ctx, '##color', OPEN.style_editor.style.colors[i], im.ColorEditFlags_AlphaBar)
-          if OPEN.style_editor.style.colors[i] ~= OPEN.style_editor.ref.colors[i] then
-          im.SameLine(ctx, nil, nil)
-            if im.Button(ctx, 'Save') then
-              OPEN.style_editor.ref.colors[i] = OPEN.style_editor.style.colors[i]
-            end
-          im.SameLine(ctx, nil, nil)
-            if im.Button(ctx, 'Revert') then
-              OPEN.style_editor.style.colors[i] = OPEN.style_editor.ref.colors[i]
-            end
-          end
-        im.SameLine(ctx, nil)
-          im.Text(ctx, name)
-          im.PopID(ctx)
+        table.insert(imgui_colors, color_data)
+      end
+    end
+
+    if #imgui_colors > 0 then
+      im.Spacing(ctx)
+      im.PushFont(ctx, Font_Andale_Mono_14)
+      im.SeparatorText(ctx, '🎨 ImGui Style Colors')
+      im.PopFont(ctx)
+
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 8, 6)
+      im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 3)
+
+      for _, color_data in ipairs(imgui_colors) do
+        local i, name = color_data[1], color_data[2]
+        im.PushID(ctx, i)
+        if im.Button(ctx, '⚡') then
+          im.DebugFlashStyleColor(ctx, i)
         end
+        im.SetItemTooltip(ctx, 'Flash this color to see where it\'s used in the UI')
+        im.SameLine(ctx, 0, 8)
+        rv, OPEN.style_editor.style.colors[i] = im.ColorEdit4(ctx, '##color', OPEN.style_editor.style.colors[i], im.ColorEditFlags_AlphaBar | im.ColorEditFlags_NoInputs)
+        im.SameLine(ctx, 0, 12)
+        im.Text(ctx, name)
+        im.PopID(ctx)
       end
 
-      im.PopItemWidth(ctx)
-      im.EndChild(ctx)
-  end
+      im.PopStyleVar(ctx, 2)
+    end
 
-  if im.BeginTabBar(ctx, '##tabs', im.TabBarFlags_None) then
-    im.EndTabBar(ctx)
+    im.EndChild(ctx)
   end
-
-  im.PopItemWidth(ctx)
 end
 
 -- Style preset management
 local function GetStylePresetsDir()
+  -- Get the script's directory for ReaPack compatibility
+  -- debug.getinfo(1, "S").source returns something like "@path/to/script.lua"
+  local script_path = debug.getinfo(1, "S").source
+  if script_path and script_path:sub(1, 1) == "@" then
+    script_path = script_path:sub(2) -- Remove the @ prefix
+  end
+  
+  if script_path then
+    -- Handle both absolute and relative paths
+    local script_dir
+    if script_path:match("^[/\\]") or script_path:match("^[A-Za-z]:[/\\]") then
+      -- Absolute path (Unix or Windows)
+      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
+    else
+      -- Relative path, make it relative to resource path
+      script_path = r.GetResourcePath() .. "/" .. script_path
+      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
+    end
+    
+    if script_dir then
+      -- Ensure trailing slash
+      if not script_dir:match("[/\\]$") then
+        script_dir = script_dir .. "/"
+      end
+      return script_dir
+    end
+  end
+  
+  -- Fallback to old path if script path can't be determined
   return r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/'
 end
 
-local function GetStylePresetsJsonPath()
-  return GetStylePresetsDir() .. 'style_presets.json'
+local function GetStylePresetsFactoryPath()
+  return GetStylePresetsDir() .. 'style_presets_FACTORY.lua'
 end
 
-local function GetStylePresetsLuaPath()
-  return GetStylePresetsDir() .. 'style_presets.lua'
+local function GetStylePresetsUserPath()
+  return GetStylePresetsDir() .. 'style_presets_USER.lua'
 end
+
+-- Track which presets are factory (read-only, shipped with script)
+local FactoryPresets = {}
+-- Track which presets are user-created/modified (should be saved to USER file)
+local UserPresets = {}
 
 local function SaveStylePresetsToFile()
    if not OPEN.style_presets then return end
    
-   -- Write Lua file (robust to read)
-   do
-     local lua_file = io.open(GetStylePresetsLuaPath(), 'w')
-     if lua_file then
-       lua_file:write('return {\n')
-       local first_preset = true
-       for preset_name, preset_data in pairs(OPEN.style_presets) do
-         if not first_preset then lua_file:write(',\n') end
-         first_preset = false
-         lua_file:write(('  ["%s"] = {\n'):format(preset_name))
-         lua_file:write('    vars = {\n')
-         local first_var = true
-         for i, value in pairs(preset_data.vars) do
-           if not first_var then lua_file:write(',\n') end
-           first_var = false
-           if type(value) == 'table' then
-             lua_file:write(('      [%d] = { %s, %s }'):format(i, tostring(value[1]), tostring(value[2])))
-           else
-             lua_file:write(('      [%d] = %s'):format(i, tostring(value)))
-           end
-         end
-         lua_file:write('\n    },\n')
-         lua_file:write('    colors = {\n')
-         local first_color = true
-         for i, value in pairs(preset_data.colors) do
-           if not first_color then lua_file:write(',\n') end
-           first_color = false
-           lua_file:write(('      [%d] = %s'):format(i, tostring(value)))
-         end
-         lua_file:write('\n    },\n')
-         -- element-specific colors
-         lua_file:write('    element_colors = {\n')
-         local first_elem = true
-         for _, key in ipairs(ElementColorKeys) do
-           if not first_elem then lua_file:write(',\n') end
-           first_elem = false
-           local v = (preset_data.element_colors and preset_data.element_colors[key]) or (Clr and Clr[key]) or 0
-           lua_file:write(('      ["%s"] = %d'):format(key, v))
-         end
-         lua_file:write('\n    }\n  }')
-       end
-       lua_file:write('\n}\n')
-       lua_file:close()
+   -- Only save USER presets (presets that user has created or modified)
+   local user_presets = {}
+   for preset_name, preset_data in pairs(OPEN.style_presets) do
+     -- Save if it's marked as a user preset (created or modified by user)
+     if UserPresets[preset_name] then
+       user_presets[preset_name] = preset_data
      end
    end
-
-   -- Mirror JSON (optional, for human readability/compat)
-   do
-     local file = io.open(GetStylePresetsJsonPath(), 'w')
-     if file then
-       file:write('{\n')
-       local first_preset = true
-       for preset_name, preset_data in pairs(OPEN.style_presets) do
-         if not first_preset then file:write(',\n') end
-         first_preset = false
-         file:write('  "' .. preset_name .. '": {\n')
-         file:write('    "vars": {\n')
-         local first_var = true
-         for i, value in pairs(preset_data.vars) do
-           if not first_var then file:write(',\n') end
-           first_var = false
-           if type(value) == 'table' then
-             file:write('      "' .. i .. '": [' .. value[1] .. ', ' .. value[2] .. ']')
-           else
-             file:write('      "' .. i .. '": ' .. value)
-           end
+   
+   -- Write USER presets to Lua file
+   local lua_file = io.open(GetStylePresetsUserPath(), 'w')
+   if lua_file then
+     lua_file:write('return {\n')
+     local first_preset = true
+     for preset_name, preset_data in pairs(user_presets) do
+       if not first_preset then lua_file:write(',\n') end
+       first_preset = false
+       lua_file:write(('  ["%s"] = {\n'):format(preset_name))
+       lua_file:write('    vars = {\n')
+       local first_var = true
+       for i, value in pairs(preset_data.vars) do
+         if not first_var then lua_file:write(',\n') end
+         first_var = false
+         if type(value) == 'table' then
+           lua_file:write(('      [%d] = { %s, %s }'):format(i, tostring(value[1]), tostring(value[2])))
+         else
+           lua_file:write(('      [%d] = %s'):format(i, tostring(value)))
          end
-         file:write('\n    },\n')
-         file:write('    "colors": {\n')
-         local first_color = true
-         for i, value in pairs(preset_data.colors) do
-           if not first_color then file:write(',\n') end
-           first_color = false
-           file:write('      "' .. i .. '": ' .. value)
-         end
-         file:write('\n    },\n')
-         -- element-specific colors (JSON)
-         file:write('    "element_colors": {\n')
-         local first_elem = true
-         for _, key in ipairs(ElementColorKeys) do
-           if not first_elem then file:write(',\n') end
-           first_elem = false
-           local v = (preset_data.element_colors and preset_data.element_colors[key]) or (Clr and Clr[key]) or 0
-           file:write('      "' .. key .. '": ' .. tostring(v))
-         end
-         file:write('\n    }\n  }')
        end
-       file:write('\n}\n')
-       file:close()
+       lua_file:write('\n    },\n')
+       lua_file:write('    colors = {\n')
+       local first_color = true
+       for i, value in pairs(preset_data.colors) do
+         if not first_color then lua_file:write(',\n') end
+         first_color = false
+         lua_file:write(('      [%d] = %s'):format(i, tostring(value)))
+       end
+       lua_file:write('\n    },\n')
+       -- element-specific colors
+       lua_file:write('    element_colors = {\n')
+       local first_elem = true
+       for _, key in ipairs(ElementColorKeys) do
+         if not first_elem then lua_file:write(',\n') end
+         first_elem = false
+         local v = (preset_data.element_colors and preset_data.element_colors[key]) or (Clr and Clr[key]) or 0
+         lua_file:write(('      ["%s"] = %d'):format(key, v))
+       end
+       lua_file:write('\n    }\n  }')
      end
+     lua_file:write('\n}\n')
+     lua_file:close()
    end
  end
 
@@ -5344,6 +5523,9 @@ local function SaveStylePreset(name)
     for i, value in pairs(OPEN.style_editor.style.colors) do
       OPEN.style_presets[name].colors[i] = value
     end
+    
+    -- Mark as user preset (even if it has the same name as a factory preset)
+    UserPresets[name] = true
     
     -- Save to file
     SaveStylePresetsToFile()
@@ -5415,191 +5597,99 @@ end
 local function LoadStylePresetsFromFile()
 
   if not OPEN.style_presets then
-    
     OPEN.style_presets = {}
   end
   
-  -- 1) Prefer Lua file
-
-    local lua_path = GetStylePresetsLuaPath()
-    local chunk, load_err = loadfile(lua_path)
-    if not chunk then
-      local fh = io.open(lua_path, 'r')
-      if fh then
-        local src = fh:read('*all')
-        fh:close()
-        if src and #src > 0 then
-          local chunk2, err2 = load(src, '@style_presets.lua')
-          if chunk2 then
-            chunk = chunk2
-          end
-        end
-      end
-    end
-
-    if chunk then
-      local ok, data = pcall(chunk)
-      if ok and type(data) == 'table' then
-        local loaded_count = 0
-        for preset_name, preset_data in pairs(data) do
-          if preset_data and type(preset_data) == 'table' and preset_data.vars and preset_data.colors then
-            OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors }
-            for k, v in pairs(preset_data.vars) do
-              OPEN.style_presets[preset_name].vars[tonumber(k)] = v
-            end
-            for k, v in pairs(preset_data.colors) do
-              OPEN.style_presets[preset_name].colors[tonumber(k)] = v
-            end
-            loaded_count = loaded_count + 1
-          end
-        end
-        if loaded_count > 0 then return end
-      end
-    end
-
+  -- Clear factory presets tracking
+  FactoryPresets = {}
   
-  -- 2) Fallback to JSON file (legacy)
-  local file_path = GetStylePresetsJsonPath()
-  local file = io.open(file_path, 'r')
+  -- 1) Load FACTORY presets first
+  -- Try multiple possible paths for ReaPack compatibility
+  local factory_paths = {
+    GetStylePresetsFactoryPath(), -- Script directory (for ReaPack)
+    r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/style_presets_FACTORY.lua', -- Fallback
+  }
   
-  if file then
-    local content = file:read('*all')
-    file:close()
+  local chunk = nil
+  for _, factory_path in ipairs(factory_paths) do
+    chunk = loadfile(factory_path)
+    if chunk then break end
     
-    local function parse_value(str)
-      str = str:match('^%s*(.-)%s*$')
-      
-      local x, y = str:match('^%[(%d+%.?%d*),%s*(%d+%.?%d*)%]$')
-      if x and y then
-        return {tonumber(x), tonumber(y)}
-      end
-      
-      local num = tonumber(str)
-      if num then
-        return num
-      end
-      
-      local str_val = str:match('^"(.-)"$')
-      if str_val then
-        return str_val
-      end
-      
-      return str
-    end
-    
-    local pos = 1
-    local function skip_whitespace()
-      while pos <= #content and content:sub(pos, pos):match('%s') do
-        pos = pos + 1
+    -- Try manual file read as fallback
+    local fh = io.open(factory_path, 'r')
+    if fh then
+      local src = fh:read('*all')
+      fh:close()
+      if src and #src > 0 then
+        local chunk2, err2 = load(src, '@style_presets_FACTORY.lua')
+        if chunk2 then
+          chunk = chunk2
+          break
+        end
       end
     end
-    
-    local function parse_object()
-      skip_whitespace()
-      if content:sub(pos, pos) ~= '{' then return nil end
-      pos = pos + 1
-      
-      local obj = {}
-      skip_whitespace()
-      
-      while pos <= #content and content:sub(pos, pos) ~= '}' do
-        skip_whitespace()
-        if content:sub(pos, pos) == ',' then
-          pos = pos + 1
-          skip_whitespace()
-        end
-        
-        local key_start = content:find('"', pos)
-        if not key_start then break end
-        local key_end = content:find('"', key_start + 1)
-        if not key_end then break end
-        
-        local key = content:sub(key_start + 1, key_end - 1)
-        pos = key_end + 1
-        
-        skip_whitespace()
-        if content:sub(pos, pos) ~= ':' then break end
-        pos = pos + 1
-        
-        local value_start = pos
-        local brace_count = 0
-        local bracket_count = 0
-        local in_string = false
-        local escape_next = false
-        
-        while pos <= #content do
-          local char = content:sub(pos, pos)
-          
-          if escape_next then
-            escape_next = false
-          elseif char == '\\' then
-            escape_next = true
-          elseif char == '"' then
-            in_string = not in_string
-          elseif not in_string then
-            if char == '{' then
-              brace_count = brace_count + 1
-            elseif char == '}' then
-              if brace_count == 0 then break end
-              brace_count = brace_count - 1
-            elseif char == '[' then
-              bracket_count = bracket_count + 1
-            elseif char == ']' then
-              bracket_count = bracket_count - 1
-            elseif char == ',' and brace_count == 0 and bracket_count == 0 then
-              break
-            end
+  end
+
+  if chunk then
+    local ok, data = pcall(chunk)
+    if ok and type(data) == 'table' then
+      for preset_name, preset_data in pairs(data) do
+        if preset_data and type(preset_data) == 'table' and preset_data.vars and preset_data.colors then
+          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors }
+          for k, v in pairs(preset_data.vars) do
+            OPEN.style_presets[preset_name].vars[tonumber(k)] = v
           end
-          
-          pos = pos + 1
-        end
-        
-        local value_str = content:sub(value_start, pos - 1)
-        
-        if value_str:find('^{') then
-          pos = value_start
-          local nested_obj = parse_object()
-          obj[key] = nested_obj
-          if content:sub(pos, pos) == '}' then
-            pos = pos + 1
+          for k, v in pairs(preset_data.colors) do
+            OPEN.style_presets[preset_name].colors[tonumber(k)] = v
           end
-        else
-          obj[key] = parse_value(value_str)
+          -- Track this as a factory preset
+          FactoryPresets[preset_name] = true
         end
-        
-        skip_whitespace()
       end
-      
-      if content:sub(pos, pos) == '}' then
-        pos = pos + 1
-      end
-      
-      return obj
     end
+  end
+
+  -- 2) Load USER presets (can override factory presets with same name)
+  -- Try multiple possible paths for ReaPack compatibility
+  local user_paths = {
+    GetStylePresetsUserPath(), -- Script directory (for ReaPack)
+    r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/style_presets_USER.lua', -- Fallback
+  }
+  
+  local user_chunk = nil
+  for _, user_path in ipairs(user_paths) do
+    user_chunk = loadfile(user_path)
+    if user_chunk then break end
     
-    local parsed = parse_object()
-    if parsed then
-      for preset_name, preset_data in pairs(parsed) do
-        if preset_data.vars and preset_data.colors then
-          OPEN.style_presets[preset_name] = {
-            vars = {},
-            colors = {},
-            element_colors = preset_data.element_colors
-          }
-          
-          for var_key, var_value in pairs(preset_data.vars) do
-            local num_key = tonumber(var_key)
-            if num_key then
-              OPEN.style_presets[preset_name].vars[num_key] = var_value
-            end
+    -- Try manual file read as fallback
+    local fh = io.open(user_path, 'r')
+    if fh then
+      local src = fh:read('*all')
+      fh:close()
+      if src and #src > 0 then
+        local chunk2, err2 = load(src, '@style_presets_USER.lua')
+        if chunk2 then
+          user_chunk = chunk2
+          break
+        end
+      end
+    end
+  end
+
+  if user_chunk then
+    local ok, data = pcall(user_chunk)
+    if ok and type(data) == 'table' then
+      for preset_name, preset_data in pairs(data) do
+        if preset_data and type(preset_data) == 'table' and preset_data.vars and preset_data.colors then
+          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors }
+          for k, v in pairs(preset_data.vars) do
+            OPEN.style_presets[preset_name].vars[tonumber(k)] = v
           end
-          
-          for color_key, color_value in pairs(preset_data.colors) do
-            local num_key = tonumber(color_key)
-            if num_key then
-              OPEN.style_presets[preset_name].colors[num_key] = color_value
-            end
+          for k, v in pairs(preset_data.colors) do
+            OPEN.style_presets[preset_name].colors[tonumber(k)] = v
           end
+          -- Mark as user preset (loaded from USER file)
+          UserPresets[preset_name] = true
         end
       end
     end
@@ -5644,7 +5734,11 @@ end
 
 local function DeleteStylePreset(name)
   if OPEN.style_presets then
+    -- Remove from user presets tracking
+    UserPresets[name] = nil
+    -- Remove from current presets
     OPEN.style_presets[name] = nil
+    -- Save USER presets (factory presets will be reloaded on next startup)
     SaveStylePresetsToFile()
   end
 end
@@ -5824,12 +5918,7 @@ local function SettingsWindow()
         im.Text(ctx, string.format('Plugins indexed: %d', (FX_LIST and #FX_LIST or 0)))
         
         im.Separator(ctx)
-        
-        -- Test Link Section
-        im.SeparatorText(ctx, 'Test Link')
-        im.Text(ctx, 'Click the link below to test opening a webpage:')
-        ShowLink(ctx, 'https://www.reaper.fm', 'Visit REAPER Website')
-        
+
         im.EndTabItem(ctx)
       end
       
@@ -5980,13 +6069,59 @@ local function SettingsWindow()
         end
         
         -- Preset selection and controls
-        local presets = GetStylePresets()
+        local all_presets = GetStylePresets()
+        -- Separate factory and user presets
+        local factory_presets = {}
+        local user_presets = {}
+        for _, name in ipairs(all_presets) do
+          if FactoryPresets[name] == true then
+            table.insert(factory_presets, name)
+          else
+            table.insert(user_presets, name)
+          end
+        end
+        table.sort(factory_presets)
+        table.sort(user_presets)
+        
+        -- Combine with separator marker
+        local presets = {}
+        for _, name in ipairs(factory_presets) do
+          table.insert(presets, {name = name, is_separator = false})
+        end
+        if #factory_presets > 0 and #user_presets > 0 then
+          table.insert(presets, {name = nil, is_separator = true})  -- Separator marker
+        end
+        for _, name in ipairs(user_presets) do
+          table.insert(presets, {name = name, is_separator = false})
+        end
+        
+        -- Create a lookup for original preset index (for compatibility)
+        local preset_name_to_index = {}
+        local original_index = 0
+        for _, item in ipairs(presets) do
+          if not item.is_separator then
+            preset_name_to_index[item.name] = original_index
+            original_index = original_index + 1
+          end
+        end
+        
         if not OPEN.selected_preset_index then OPEN.selected_preset_index = 0 end
-        if OPEN.selected_preset_index >= #presets then OPEN.selected_preset_index = 0 end
+        local actual_preset_count = #factory_presets + #user_presets
+        if OPEN.selected_preset_index >= actual_preset_count then OPEN.selected_preset_index = 0 end
 
         -- Track currently loaded preset name
-        if not OPEN.loaded_preset_name and #presets > 0 and OPEN.selected_preset_index >= 0 then
-          OPEN.loaded_preset_name = presets[OPEN.selected_preset_index + 1]
+        if not OPEN.loaded_preset_name and actual_preset_count > 0 and OPEN.selected_preset_index >= 0 then
+          -- Find the preset at the selected index
+          local found_index = 0
+          for _, item in ipairs(presets) do
+            if not item.is_separator then
+              if found_index == OPEN.selected_preset_index then
+                OPEN.loaded_preset_name = item.name
+                break
+              end
+              found_index = found_index + 1
+            end
+          end
         end
 
         local function IsDirtyAgainstPreset(name)
@@ -6024,54 +6159,73 @@ local function SettingsWindow()
               im.TableSetupColumn(ctx, 'Name', (im.TableColumnFlags_WidthStretch or 0))
               im.TableSetupColumn(ctx, 'Del',  (im.TableColumnFlags_WidthFixed or 0), ln + 6)
             end
-            for i, name in ipairs(presets) do
-              im.TableNextRow(ctx)
-              -- Column 1: selectable label
-              im.TableSetColumnIndex(ctx, 0)
-              local isSel = (OPEN.loaded_preset_name == name)
-              local chosen = im.Selectable(ctx, name, isSel)
-              -- Column 2: trash icon
-              im.TableSetColumnIndex(ctx, 1)
-              if Img and Img.Trash then
-                -- dim unless hovered
-                local hovered = im.IsItemHovered and im.IsItemHovered(ctx) -- will re-evaluate after placing button
-                -- we need to place button first to evaluate hover; so compute tint by checking mouse pos in cell rect
-                local cellL, cellT = im.GetCursorScreenPos(ctx)
-                local cellR = cellL + ln
-                local cellB = cellT + ln
-                local isHvr = im.IsMouseHoveringRect(ctx, cellL, cellT, cellR, cellB)
-                local tint = isHvr and 0xffffffff or 0x55555577
-                im.PushStyleColor(ctx, im.Col_Button, 0x00000022)
-                im.PushStyleColor(ctx, im.Col_ButtonHovered, 0x00000022)
-
-                if im.ImageButton(ctx, '##del_' .. name, Img.Trash, ln, ln, nil, nil, nil, nil, nil, tint) then
-                  OPEN.confirm_delete_preset = name
-                  OPEN.open_confirm_delete_next_frame = true
-                  if im.CloseCurrentPopup then im.CloseCurrentPopup(ctx) end
-                end
-                im.PopStyleColor(ctx,2)
-              else
+            local actual_index = 0
+            for i, item in ipairs(presets) do
+              if item.is_separator then
+                im.TableNextRow(ctx)
+                im.TableSetColumnIndex(ctx, 0)
+                im.Separator(ctx)
+                im.TableSetColumnIndex(ctx, 1)
                 im.Dummy(ctx, ln, ln)
-              end
-              if chosen then
-                OPEN.selected_preset_index = i - 1
-                OPEN.loaded_preset_name = name
-                LoadStylePreset(name)
-                SaveChosenPresetGlobal(name)
+              else
+                local name = item.name
+                im.TableNextRow(ctx)
+                -- Column 1: selectable label
+                im.TableSetColumnIndex(ctx, 0)
+                local isSel = (OPEN.loaded_preset_name == name)
+                local chosen = im.Selectable(ctx, name, isSel)
+                -- Column 2: trash icon (only for user presets, not factory presets)
+                im.TableSetColumnIndex(ctx, 1)
+                local isFactoryPreset = FactoryPresets[name] == true
+                if Img and Img.Trash and not isFactoryPreset then
+                  -- dim unless hovered
+                  local hovered = im.IsItemHovered and im.IsItemHovered(ctx) -- will re-evaluate after placing button
+                  -- we need to place button first to evaluate hover; so compute tint by checking mouse pos in cell rect
+                  local cellL, cellT = im.GetCursorScreenPos(ctx)
+                  local cellR = cellL + ln
+                  local cellB = cellT + ln
+                  local isHvr = im.IsMouseHoveringRect(ctx, cellL, cellT, cellR, cellB)
+                  local tint = isHvr and 0xffffffff or 0x55555577
+                  im.PushStyleColor(ctx, im.Col_Button, 0x00000022)
+                  im.PushStyleColor(ctx, im.Col_ButtonHovered, 0x00000022)
+
+                  if im.ImageButton(ctx, '##del_' .. name, Img.Trash, ln, ln, nil, nil, nil, nil, nil, tint) then
+                    OPEN.confirm_delete_preset = name
+                    OPEN.open_confirm_delete_next_frame = true
+                    if im.CloseCurrentPopup then im.CloseCurrentPopup(ctx) end
+                  end
+                  im.PopStyleColor(ctx,2)
+                else
+                  im.Dummy(ctx, ln, ln)
+                end
+                if chosen then
+                  OPEN.selected_preset_index = actual_index
+                  OPEN.loaded_preset_name = name
+                  LoadStylePreset(name)
+                  SaveChosenPresetGlobal(name)
+                end
+                actual_index = actual_index + 1
               end
             end
             im.EndTable(ctx)
           else
             -- Fallback simple list
-            for i, name in ipairs(presets) do
-              local isSel = (OPEN.loaded_preset_name == name)
-              local label = name
-              if IsDirtyAgainstPreset(name) then label = label .. ' *Edited*' end
-              if im.Selectable(ctx, label, isSel) then
-                OPEN.selected_preset_index = i - 1
-                OPEN.loaded_preset_name = name
-                LoadStylePreset(name)
-                SaveChosenPresetGlobal(name)
+            local actual_index = 0
+            for i, item in ipairs(presets) do
+              if item.is_separator then
+                im.Separator(ctx)
+              else
+                local name = item.name
+                local isSel = (OPEN.loaded_preset_name == name)
+                local label = name
+                if IsDirtyAgainstPreset(name) then label = label .. ' *Edited*' end
+                if im.Selectable(ctx, label, isSel) then
+                  OPEN.selected_preset_index = actual_index
+                  OPEN.loaded_preset_name = name
+                  LoadStylePreset(name)
+                  SaveChosenPresetGlobal(name)
+                end
+                actual_index = actual_index + 1
               end
             end
           end
@@ -6096,25 +6250,75 @@ local function SettingsWindow()
         -- Confirm delete modal
         if im.BeginPopupModal and im.BeginPopupModal(ctx, '##ConfirmDeletePreset', true, (im.WindowFlags_AlwaysAutoResize or 0)) then
           local name = OPEN.confirm_delete_preset
-          im.Text(ctx, 'Delete preset "' .. tostring(name or '') .. '"? This cannot be undone.')
-          im.Separator(ctx)
-          -- Space out buttons
-          if im.Button(ctx, 'Cancel') then
-            OPEN.confirm_delete_preset = nil
-            im.CloseCurrentPopup(ctx)
-          end
-          im.SameLine(ctx, nil, 10)
-          if im.Button(ctx, 'Delete') then
-            if name then
-              DeleteStylePreset(name)
+          local isFactoryPreset = name and FactoryPresets[name] == true
+          
+          if isFactoryPreset then
+            im.Text(ctx, 'Cannot delete factory preset "' .. tostring(name or '') .. '".')
+            im.Separator(ctx)
+            if im.Button(ctx, 'OK') then
+              OPEN.confirm_delete_preset = nil
+              im.CloseCurrentPopup(ctx)
+            end
+          else
+            im.Text(ctx, 'Delete preset "' .. tostring(name or '') .. '"? This cannot be undone.')
+            im.Separator(ctx)
+            -- Space out buttons
+            if im.Button(ctx, 'Cancel') then
+              OPEN.confirm_delete_preset = nil
+              im.CloseCurrentPopup(ctx)
+            end
+            im.SameLine(ctx, nil, 10)
+            if im.Button(ctx, 'Delete') then
+              if name then
+                -- Find the index of the preset being deleted in the original list
+                local deleted_index = nil
+                for i, preset_name in ipairs(all_presets) do
+                  if preset_name == name then
+                    deleted_index = i - 1  -- 0-based index
+                    break
+                  end
+                end
+                
+                DeleteStylePreset(name)
+              
               -- If we deleted the chosen preset, clear global saved value
               local saved = LoadChosenPresetGlobal()
               if saved == name then SaveChosenPresetGlobal('') end
-              if OPEN.loaded_preset_name == name then OPEN.loaded_preset_name = nil end
-              OPEN.selected_preset_index = 0
+              
+              -- Reload presets list after deletion
+              local reloaded_presets = GetStylePresets()
+              
+              -- Determine which preset to load next
+              local next_preset_name = nil
+              if #reloaded_presets > 0 then
+                -- If we deleted the last preset, go to the new last one
+                -- Otherwise, try to stay at the same index (which will now point to the next preset)
+                local next_index = deleted_index
+                if next_index >= #reloaded_presets then
+                  next_index = #reloaded_presets - 1
+                end
+                if next_index >= 0 then
+                  next_preset_name = reloaded_presets[next_index + 1]  -- Convert to 1-based
+                  OPEN.selected_preset_index = next_index
+                else
+                  next_preset_name = reloaded_presets[1]
+                  OPEN.selected_preset_index = 0
+                end
+              end
+              
+              -- Load the next preset if available
+              if next_preset_name then
+                OPEN.loaded_preset_name = next_preset_name
+                LoadStylePreset(next_preset_name)
+                SaveChosenPresetGlobal(next_preset_name)
+              else
+                OPEN.loaded_preset_name = nil
+                OPEN.selected_preset_index = 0
+              end
+              end
+              OPEN.confirm_delete_preset = nil
+              im.CloseCurrentPopup(ctx)
             end
-            OPEN.confirm_delete_preset = nil
-            im.CloseCurrentPopup(ctx)
           end
           im.EndPopup(ctx)
         end
@@ -6387,6 +6591,8 @@ local function ApplyDefaultStylePresetIfAny()
   if not OPEN.apply_default_style_next_frame then return end
 
   -- Ensure our cached copy is up-to-date with the chosen default
+  -- Note: USER presets override FACTORY presets in OPEN.style_presets (loaded after FACTORY),
+  -- so checking OPEN.style_presets['default'] will already return USER version if it exists
   local currentName = OPEN.style_default_preset
   if (not currentName or currentName == '') and OPEN.style_presets and OPEN.style_presets['default'] then
     currentName = 'default'
@@ -6488,10 +6694,10 @@ function loop()
 
   ------ menu bar -------
   if im.BeginMenuBar( ctx) then 
-    -- Apply menu bar button colors (hover/active derived from base color)
-    local menuBarBase = Clr.MenuBarButton or 0x00000000
-    local menuBarHover = deriveHover and deriveHover(menuBarBase) or LightenColorU32(menuBarBase, 0.20)
-    local menuBarActive = deriveActive and deriveActive(menuBarBase) or DarkenColorU32(menuBarBase, 0.10)
+    -- Apply menu bar button colors (using FX button colors from style preset)
+    local menuBarBase = Clr.Buttons or 0x333333ff
+    local menuBarHover = Clr.ButtonsHvr or 0x555555ff
+    local menuBarActive = Clr.ButtonsAct or 0x777777ff
     
     -- Set colors for menu items (Monitor FX, Sends, Snapshots)
     im.PushStyleColor(ctx, im.Col_HeaderHovered, menuBarHover)
@@ -6518,10 +6724,10 @@ function loop()
     if OPEN.Snapshots then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) end
     ---------------------------------------------------------------------
     ---
-    -- Set colors for settings button
-    im.PushStyleColor(ctx, im.Col_Button, menuBarBase)
-    im.PushStyleColor(ctx, im.Col_ButtonHovered, menuBarHover)
-    im.PushStyleColor(ctx, im.Col_ButtonActive, menuBarActive)
+    -- Set colors for settings button (transparent base, FX button colors for hover/active)
+    im.PushStyleColor(ctx, im.Col_Button, 0x00000000)
+    im.PushStyleColor(ctx, im.Col_ButtonHovered, Clr.ButtonsHvr or 0x555555ff)
+    im.PushStyleColor(ctx, im.Col_ButtonActive, Clr.ButtonsAct or 0x777777ff)
     if Img and Img.Settings then
       if im.ImageButton(ctx,'settings icon', Img.Settings, 16, 16) then
         OPEN.Settings = not (OPEN.Settings == true)
@@ -7989,6 +8195,7 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
 
   if im.BeginChild(ctx, 'Snapshots' .. tostring(TrkGUID), SnapshotPane_W, rowHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then
     im.Dummy(ctx, 0, 1) -- top margin
+    local indicesToRemove = {}
     for i, snap in ipairs(snaps) do
       im.PushID(ctx, i)
       -- Capture / overwrite / recall button
@@ -8020,12 +8227,15 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
       else
         -- Capture / recall small button as camera image
         local clicked = im.ImageButton(ctx, '##cap'..tostring(i)..tostring(TrkGUID), Img.Camera, 16, 16, nil,nil,nil,nil, nil, Clr.SnapshotOverlay)
+        local cameraHovered = im.IsItemHovered(ctx)
+        local cameraL, cameraT = im.GetItemRectMin(ctx)
+        local cameraB = cameraT + 18 -- button height is 18
         -- Overlay brighter tint on hover/active
         local baseColor = Clr.SnapshotOverlay
         local overlayTint
         if im.IsItemActive(ctx) then
           overlayTint = (baseColor & 0x00FFFFFF) | 0xFF000000 -- fully opaque when pressed
-        elseif im.IsItemHovered(ctx) then
+        elseif cameraHovered then
           overlayTint = (baseColor & 0x00FFFFFF) | 0xCC000000 -- less transparent on hover
         end
         if overlayTint then
@@ -8034,11 +8244,18 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
           im.DrawList_AddImage(im.GetWindowDrawList(ctx), Img.Camera, L, T, R, B, nil, nil, nil, nil, overlayTint)
         end
         if clicked then
-          r.Undo_BeginBlock()
-          r.SetTrackStateChunk(Track, snap.chunk, true)
-          r.Undo_EndBlock('Recall Snapshot', -1)
-          r.TrackList_AdjustWindows(false)
-          r.UpdateArrange()
+          if Mods == Alt then
+            -- Alt+click: remove snapshot
+            table.insert(indicesToRemove, i)
+            SaveNow = true
+          else
+            -- Normal click: replace snapshot with current state
+            local ok, chunk = r.GetTrackStateChunk(Track, '', false)
+            if ok then
+              snap.chunk = chunk
+              SaveNow = true
+            end
+          end
         end
         im.SameLine(ctx, nil, 2)
         local labelAreaW = SnapshotPane_W - 18
@@ -8054,10 +8271,24 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
         else
           local disp = (snap.label ~= '' and snap.label) or tostring(i)
           im.Button(ctx, disp .. '##lbl', labelAreaW, 18)
+          local textHovered = im.IsItemHovered(ctx)
           
+          -- Show red X and overlay covering entire row when Alt+hovering either button
+          if Mods == Alt and (cameraHovered or textHovered) then
+            DrawXIndicator(ctx, 12, 0xFF0000FF) -- Red X with size 12
+            local WDL = im.GetWindowDrawList(ctx)
+            -- Draw full-width overlay covering entire row (camera button + text button)
+            local rowR = cameraL + SnapshotPane_W
+            im.DrawList_AddRectFilled(WDL, cameraL, cameraT, rowR, cameraB, 0x00000044)
+            im.DrawList_AddRect(WDL, cameraL, cameraT, rowR, cameraB, 0x991111ff)
+          end
            
             if im.IsItemClicked(ctx) then
-              if Mods == 0 then 
+              if Mods == Alt then
+                -- Alt+click: remove snapshot
+                table.insert(indicesToRemove, i)
+                SaveNow = true
+              elseif Mods == 0 then 
                 r.Undo_BeginBlock()
                 r.SetTrackStateChunk(Track, snap.chunk, true)
                 r.Undo_EndBlock('Recall Snapshot', -1)
@@ -8079,6 +8310,10 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
         end
       end
       im.PopID(ctx)
+    end
+    -- Remove snapshots in reverse order to maintain correct indices
+    for j = #indicesToRemove, 1, -1 do
+      table.remove(snaps, indicesToRemove[j])
     end
     im.EndChild(ctx)
   end
