@@ -2908,7 +2908,15 @@ function Send_Btn(ctx, Track, t, BtnSize)
               local srcGUID = r.GetTrackGUID(Track)
               local rKey = MakeRecvKey(DestTrk, srcGUID, receiveIndex)
               if not ReceiveDeleteAnim[rKey] then
-                ReceiveDeleteAnim[rKey] = { progress = 0, track = DestTrk, index = receiveIndex, srcGUID = rKey, delay = 1 }
+                -- Flag as send-initiated so the receive animation won't trigger an extra deletion
+                ReceiveDeleteAnim[rKey] = {
+                  progress = 0,
+                  track = DestTrk,
+                  index = receiveIndex,
+                  srcGUID = srcGUID,
+                  delay = 1,
+                  skipRemoval = true
+                }
                 -- Clear any create animation state
                 ReceiveCreateAnim[rKey] = nil
               end
@@ -2935,10 +2943,22 @@ function Send_Btn(ctx, Track, t, BtnSize)
         else
           local done = AdvanceDeleteAnimAndOverlay(ctx, anim, rowMinX, rowMinY, rowMaxX, rowCurH, baseRowH)
           if done and not anim.queued then
-             anim.queued = true
-             local tg = r.GetTrackGUID(Track)
-             PendingSendRemovals[tg] = PendingSendRemovals[tg] or {}
-             table.insert(PendingSendRemovals[tg], { idx = i, container = Snd and Snd.Container, key = sendKey, destGUID = anim.destGUID })
+             if anim.skipRemoval then
+               -- This send was animated from a receive-side delete; underlying send already removed
+               SendDeleteAnim[sendKey] = nil
+             else
+               anim.queued = true
+               local tg = r.GetTrackGUID(Track)
+               PendingSendRemovals[tg] = PendingSendRemovals[tg] or {}
+               -- Avoid queueing the same send multiple times (e.g. if animation restarts)
+               local alreadyQueued = false
+               for _, e in ipairs(PendingSendRemovals[tg]) do
+                 if e and e.key == sendKey then alreadyQueued = true break end
+               end
+               if not alreadyQueued then
+                 table.insert(PendingSendRemovals[tg], { idx = i, container = Snd and Snd.Container, key = sendKey, destGUID = anim.destGUID })
+               end
+             end
           end
         end
       end
@@ -3823,10 +3843,15 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
           local done = AdvanceDeleteAnimAndOverlay(ctx, anim, x, y, x + (Send_W or 0), curH, baseH)
           ReceiveDeleteAnim[key] = anim
           if done and not anim.queued then
-            anim.queued = true
-            local tg = r.GetTrackGUID(Track)
-            PendingRecvRemovals[tg] = PendingRecvRemovals[tg] or {}
-            table.insert(PendingRecvRemovals[tg], { idx = i, key = key })
+            if anim.skipRemoval then
+              -- Send-side deletion already removed the underlying send; just clear the animation
+              ReceiveDeleteAnim[key] = nil
+            else
+              anim.queued = true
+              local tg = r.GetTrackGUID(Track)
+              PendingRecvRemovals[tg] = PendingRecvRemovals[tg] or {}
+              table.insert(PendingRecvRemovals[tg], { idx = i, key = key })
+            end
           end
         end
       end

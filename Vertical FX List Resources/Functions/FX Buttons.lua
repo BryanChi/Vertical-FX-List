@@ -646,9 +646,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       ShownName = s
     end
 
-    -- Visual improvements: rounded corners and better border
+    -- Visual improvements: square corners and better border
     im.PushStyleVar(ctx, im.StyleVar_FrameBorderSize, 1)
-    im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 3) -- Subtle rounded corners
+    im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 0) -- Square corners
       local autoBtnW = 0
       local hasAuto = FX_HasAutomation(Track, fx)
       if (not IsDeleting) and hasAuto and Img.Graph then
@@ -1098,7 +1098,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             local h = math.max(0, math.floor(fullH * (1 - anim.progress)))
             im.PushStyleVar(ctx, im.StyleVar_FramePadding, padX, padY)
             im.PushStyleVar(ctx, im.StyleVar_FrameBorderSize, 1)
-            im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 3) -- Consistent rounded corners
+            im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 0) -- Square corners
             rv = im.Button(ctx, ShownName .. '##' .. fx, btnWidthForThis, h)
             im.PopStyleVar(ctx, 3)
             -- advance animation
@@ -1999,8 +1999,6 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     end
     if IsDeleting then showKnob = false end
     if showKnob then
-      local knobBg = FX_Is_Offline and 0x771111ff or getClr(im.Col_Button)
-      im.DrawList_AddRectFilled(WDL, R, Tbtn, R + WetDryKnobSz, Tbtn + LineH, knobBg)
       --[[ im.DrawList_AddCircleFilled(WDL, knobCenterX, knobCenterY, WetDryKnobSz, getClr(im.Col_Button)) ]]
       --im.DrawList_AddCircleFilled(WDL, knobCenterX, knobCenterY, knobRadius, getClr(im.Col_Button))
      -- im.DrawList_AddCircle(WDL, knobCenterX, knobCenterY, knobRadius, 0xffffffff, 12, 1)
