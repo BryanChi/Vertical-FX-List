@@ -323,6 +323,10 @@ ContainerAnim = {}
 -- Delete animation state per FX GUID
 FXDeleteAnim = FXDeleteAnim or {}
 PendingDeleteGUIDs = PendingDeleteGUIDs or {}
+-- Track delayed snapshot panel closures (to prevent accidental FX deletion)
+DelaySnapshotPanelClose = DelaySnapshotPanelClose or {}
+-- Animation for snapshot panel closing
+SnapshotPanelCloseAnim = SnapshotPanelCloseAnim or {}
 -- Default delete animation step (thousandths = 750 => 0.750 per frame)
 DELETE_ANIM_STEP = DELETE_ANIM_STEP or 0.750
 
@@ -340,9 +344,14 @@ dofile(function_folder..'Sends.lua')
 local function SaveOpenState()
   local parts = {}
   for k, v in pairs(OPEN) do
-    -- Persist only project-scoped booleans; skip globals like ShowHiddenParents and Settings
-    if k ~= 'ShowHiddenParents' and k ~= 'Settings' and v and type(v)=='boolean' then
-      parts[#parts+1] = k .. '=' .. (v and '1' or '0')
+    -- Persist only project-scoped values; skip globals like ShowHiddenParents and Settings
+    if k ~= 'ShowHiddenParents' and k ~= 'Settings' then
+      if k == 'Snapshots' and type(v) == 'number' then
+        -- Handle Snapshots as numeric value (0=hidden, 1=show with snapshots, 2=show all)
+        parts[#parts+1] = k .. '=' .. tostring(v)
+      elseif v and type(v)=='boolean' then
+        parts[#parts+1] = k .. '=' .. (v and '1' or '0')
+      end
     end
   end
   local str = table.concat(parts, ';')
@@ -353,8 +362,15 @@ local function LoadOpenState()
   local ok, str = r.GetProjExtState(0, OPEN_SECTION, OPEN_KEY)
   if ok == 1 and str ~= '' then
     for pair in string.gmatch(str, '([^;]+)') do
-      local k, val = pair:match('([^=]+)=(%d)')
-      if k then OPEN[k] = (val=='1') end
+      local k, val = pair:match('([^=]+)=(%d+)')
+      if k and val then
+        if k == 'Snapshots' then
+          -- Handle Snapshots as numeric value (0=hidden, 1=show with snapshots, 2=show all)
+          OPEN[k] = tonumber(val) or 0
+        else
+          OPEN[k] = (val=='1')
+        end
+      end
     end
   end
 end
@@ -1011,6 +1027,14 @@ function DrawChevronLineStatic(draw_list, x, y1, y2, color, invertDir)
   end
 end
 
+-- Normalize hyphens and spaces to treat them as equivalent for search
+local function NormalizeHyphensAndSpaces(text)
+  if not text then return '' end
+  -- Replace hyphens with spaces, then normalize multiple spaces
+  local result = text:gsub('-', ' '):gsub('%s+', ' ')
+  return result:match('^%s*(.-)%s*$') -- trim
+end
+
 function ThirdPartyDeps()
   local ultraschall_path = reaper.GetResourcePath() .. "/UserPlugins/ultraschall_api.lua"
   if ultraschall_path then dofile(ultraschall_path)end
@@ -1066,8 +1090,10 @@ function ThirdPartyDeps()
                 
                 local filtered = {}
                 local filter_lower = filter_text:lower()
+                local filter_normalized = NormalizeHyphensAndSpaces(filter_lower)
                 for _, fx_name in ipairs(FX_LIST) do
-                    if fx_name:lower():find(filter_lower, 1, true) then
+                    local fx_normalized = NormalizeHyphensAndSpaces(fx_name:lower())
+                    if fx_normalized:find(filter_normalized, 1, true) then
                         table.insert(filtered, fx_name)
                     end
                 end
@@ -1548,12 +1574,46 @@ local function StripParentheses(fx_name)
   return result
 end
 
--- Helper function to normalize hyphens and spaces (treat them as equivalent)
-local function NormalizeHyphensAndSpaces(text)
-  if not text then return '' end
-  -- Replace hyphens with spaces, then normalize multiple spaces
-  local result = text:gsub('-', ' '):gsub('%s+', ' ')
-  return result:match('^%s*(.-)%s*$') -- trim
+-- Helper function to collect all FXs in a link group (traverses bidirectional links)
+-- Returns a table mapping GUID -> true for all FXs in the group
+function CollectLinkedFXs(startGUID)
+  if not startGUID or not FX[startGUID] then
+    return {} -- Return empty table if FX doesn't exist
+  end
+  if not FX[startGUID].Link then
+    return {[startGUID] = true} -- Return just the starting FX if not linked
+  end
+  
+  local linkedGroup = {}
+  local visited = {}
+  local toVisit = {startGUID}
+  
+  -- Breadth-first traversal to find all linked FXs
+  while #toVisit > 0 do
+    local currentGUID = table.remove(toVisit, 1)
+    if not visited[currentGUID] then
+      visited[currentGUID] = true
+      linkedGroup[currentGUID] = true
+      
+      -- Check if this FX has a link
+      if FX[currentGUID] and FX[currentGUID].Link then
+        local linkedGUID = FX[currentGUID].Link
+        if not visited[linkedGUID] then
+          table.insert(toVisit, linkedGUID)
+        end
+      end
+      
+      -- Also check reverse links (FXs that link to this one)
+      -- We need to scan all FXs to find ones that link to currentGUID
+      for guid, fxData in pairs(FX) do
+        if fxData and fxData.Link == currentGUID and not visited[guid] then
+          table.insert(toVisit, guid)
+        end
+      end
+    end
+  end
+  
+  return linkedGroup
 end
 
 -- Enhanced filter function that supports category filtering (optimized)
@@ -1864,7 +1924,7 @@ local function PanFaderActivation(ctx)
     if MIX_MODE then MIX_MODE = false else MIX_MODE = true end
   end
 
-  if Mods == Ctrl+ Alt then 
+  if Mods == Ctrl+ Shift then 
     MIX_MODE_Temp = true 
   else 
     MIX_MODE_Temp = nil
@@ -1979,20 +2039,26 @@ function FX_Btn_Mouse_Interaction(rv,Track, fx,FX_Is_Open,FX_Is_Offline,ctx)
         r.TrackFX_Show(Track, fx, 3)
       end
     elseif Mods == Alt then
-      -- Trigger shrink delete animation instead of immediate delete
-      local guid = r.TrackFX_GetFXGUID(Track, fx)
-      if guid then
-        FXDeleteAnim = FXDeleteAnim or {}
-        if not FXDeleteAnim[guid] then
-          FXDeleteAnim[guid] = { progress = 0, track = Track, index = fx }
-        end
+      local totalSel = CountSelectedFXs and CountSelectedFXs() or 0
+      if totalSel > 1 and isSelected then
+        DeleteSelectedFXs()
       else
-        DeleteFX(fx, Track)
+        -- Trigger shrink delete animation instead of immediate delete
+        local guid = r.TrackFX_GetFXGUID(Track, fx)
+        if guid then
+          FXDeleteAnim = FXDeleteAnim or {}
+          if not FXDeleteAnim[guid] then
+            FXDeleteAnim[guid] = { progress = 0, track = Track, index = fx }
+          end
+        else
+          DeleteFX(fx, Track)
+        end
+        HoveredLinkedFXID = nil
       end
-      HoveredLinkedFXID = nil
     elseif Mods == Shift then
-      -- If multiple FXs are selected, bypass all of them
-      if MultiSelectionButtons.visible then
+      -- If multiple FXs are selected and this FX is in the selection, bypass all of them
+      local totalSel = CountSelectedFXs and CountSelectedFXs() or 0
+      if totalSel > 1 and isSelected then
         BypassSelectedFXs()
       else
         ToggleBypassFX(Track, fx)
@@ -2003,16 +2069,21 @@ function FX_Btn_Mouse_Interaction(rv,Track, fx,FX_Is_Open,FX_Is_Offline,ctx)
   -- Fallback: if Alt is held and the button item was hovered on mouse release,
   -- trigger delete animation even if rv was false (e.g., special sub-controls)
   if Mods == Alt and im.IsItemHovered(ctx) and im.IsMouseReleased(ctx, 0) then
-    local guid = r.TrackFX_GetFXGUID(Track, fx)
-    if guid then
-      FXDeleteAnim = FXDeleteAnim or {}
-      if not FXDeleteAnim[guid] then
-        FXDeleteAnim[guid] = { progress = 0, track = Track, index = fx }
-      end
+    local totalSel = CountSelectedFXs and CountSelectedFXs() or 0
+    if totalSel > 1 and isSelected then
+      DeleteSelectedFXs()
     else
-      DeleteFX(fx, Track)
+      local guid = r.TrackFX_GetFXGUID(Track, fx)
+      if guid then
+        FXDeleteAnim = FXDeleteAnim or {}
+        if not FXDeleteAnim[guid] then
+          FXDeleteAnim[guid] = { progress = 0, track = Track, index = fx }
+        end
+      else
+        DeleteFX(fx, Track)
+      end
+      HoveredLinkedFXID = nil
     end
-    HoveredLinkedFXID = nil
   end
   
   local WDL =im.GetWindowDrawList(ctx)
@@ -2381,11 +2452,13 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
       local filtered_favorites = {}
       if has_search_query and filter_text ~= '' then
           local filter_lower = filter_text:lower()
+          local filter_normalized = NormalizeHyphensAndSpaces(filter_lower)
           for _, fav_fx in ipairs(all_favorites) do
               -- Parse FX name for matching
               local name, manufacturer, type = ParseFXForFilter(fav_fx)
               local search_text = (name .. ' ' .. (manufacturer or '') .. ' ' .. (type or '')):lower()
-              if search_text:find(filter_lower, 1, true) then
+              local search_normalized = NormalizeHyphensAndSpaces(search_text)
+              if search_normalized:find(filter_normalized, 1, true) then
                   table.insert(filtered_favorites, fav_fx)
               end
           end
@@ -2686,8 +2759,10 @@ function FilterBox(ctx,Track, FX_Idx, LyrID, SpaceIsBeforeRackMixer, FxGUID_Cont
           
           local filtered = {}
           local filter_lower = filter_text:lower()
+          local filter_normalized = NormalizeHyphensAndSpaces(filter_lower)
           for _, fx_name in ipairs(FX_LIST) do
-              if fx_name:lower():find(filter_lower, 1, true) then
+              local fx_normalized = NormalizeHyphensAndSpaces(fx_name:lower())
+              if fx_normalized:find(filter_normalized, 1, true) then
                   table.insert(filtered, fx_name)
               end
           end
@@ -4533,14 +4608,17 @@ function Add_WetDryKnob(ctx, label, labeltoShow, p_value, v_min, v_max, FX_Idx, 
     if p_value > v_max then p_value = v_max end
   end
 
-  -- Get wet/dry envelope and check if it has data
+  -- Get wet/dry envelope and check if it has actual envelope points written (same condition as automation icon)
   local wetDryEnv = r.GetFXEnvelope(Track, FX_Idx, P_Num, false)
   local envHasData = wetDryEnv and EnvelopeHasAnyData(wetDryEnv) or false
 
-  -- Handle Ctrl+click to open wet/dry envelope
+  -- Handle Ctrl+click to open wet/dry envelope (but not Ctrl+Alt+click)
   if im.IsItemClicked(ctx) then
     local currentMods = im.GetKeyMods(ctx)
-    if currentMods == Ctrl or (currentMods & Ctrl) ~= 0 then
+    local hasCtrl = (currentMods == Ctrl) or ((currentMods & Ctrl) ~= 0)
+    local hasAlt = (currentMods == Alt) or ((currentMods & Alt) ~= 0)
+    
+    if hasCtrl and not hasAlt then
       -- Ctrl+Left-click: show wet/dry envelope
       -- Select the track first (required for envelope operations)
       r.SetOnlyTrackSelected(Track)
@@ -4559,13 +4637,21 @@ function Add_WetDryKnob(ctx, label, labeltoShow, p_value, v_min, v_max, FX_Idx, 
           r.GetSetEnvelopeInfo_String(wetDryEnv, 'SHOWLANE', '1', true)
           r.GetSetEnvelopeInfo_String(wetDryEnv, 'ACTIVE', '1', true)
           r.TrackList_AdjustWindows(false)
-          -- Refresh envelope check after creating/showing
+          -- Refresh envelope check after creating/showing (same condition as automation icon)
           envHasData = EnvelopeHasAnyData(wetDryEnv)
         end
+      end
+    elseif hasCtrl and hasAlt then
+      -- Ctrl+Alt+Left-click: toggle delta
+      if DeltaP_V == 1 then
+        r.TrackFX_SetParamNormalized(Track, FX_Idx, Delta_P, 0)
+      else
+        r.TrackFX_SetParamNormalized(Track, FX_Idx, Delta_P, 1)
       end
     end
   end
 
+  -- Handle Alt+Right-click: toggle delta (legacy support)
   if im.IsItemClicked(ctx, 1) and Mods == Alt then
     if DeltaP_V == 1 then
         r.TrackFX_SetParamNormalized(Track, FX_Idx, Delta_P, 0)
@@ -4644,7 +4730,12 @@ end
       local radius_outer = radius_outer
       im.DrawList_AddTriangleFilled(draw_list, center[1] - radius_outer, center[2] + radius_outer, center[1],
           center[2] - radius_outer, center[1] + radius_outer, center[2] + radius_outer, 0x999900ff)
-      im.DrawList_AddText(draw_list, center[1] - radius_outer / 2 + 1, center[2] - radius_outer / 2,
+      -- Calculate text size to center the "S" properly
+      local text_size = { im.CalcTextSize(ctx, 'S') }
+      local text_width = text_size[1]
+      local text_height = text_size[2]
+      -- Center the text horizontally and vertically within the triangle (slightly lower for visual balance)
+      im.DrawList_AddText(draw_list, center[1] - text_width / 2, center[2] - text_height / 2 + 1,
           0xffffffff, 'S')
   end
   
@@ -6596,7 +6687,11 @@ function KeyboardShortcuts()
 
     local actions = {
       ToggleSends     = function() OPEN.ShowSends = toggle(OPEN.ShowSends); SaveOpenState() end,
-      ToggleSnapshots = function() OPEN.Snapshots = toggle(OPEN.Snapshots); SaveOpenState() end,
+      ToggleSnapshots = function()
+        -- Cycle through 3 states: 0=hidden, 1=show tracks with snapshots, 2=show all tracks
+        OPEN.Snapshots = ((OPEN.Snapshots or 0) + 1) % 3
+        SaveOpenState()
+      end,
       ToggleMonitorFX = function() OPEN.MonitorFX = toggle(OPEN.MonitorFX); SaveOpenState() end,
       ExpandTrack     = function()
 
@@ -6766,10 +6861,21 @@ function loop()
     if (OPEN.ShowSends ~= false) then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) end
     
     if im.MenuItem(ctx, 'Snapshots') then
-      OPEN.Snapshots = not (OPEN.Snapshots == true)
+      -- Cycle through 3 states: 0=hidden, 1=show tracks with snapshots, 2=show all tracks
+      OPEN.Snapshots = ((OPEN.Snapshots or 0) + 1) % 3
       SaveOpenState()
     end
-    if OPEN.Snapshots then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) end
+    -- Highlight based on snapshot state: dim for state 1, bright for state 2
+    if (OPEN.Snapshots or 0) > 0 then
+      if (OPEN.Snapshots or 0) == 2 then
+        HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) -- Full highlight for show all
+      else
+        -- Dim highlight for show with snapshots only
+        local dimFill = ((Clr.GenericHighlightFill or 0x400080ff) & 0x00ffffff) | 0x40000000
+        local dimOutline = ((Clr.GenericHighlightOutline or 0x8000ffff) & 0x00ffffff) | 0x40000000
+        HighlightItem(dimFill, nil, dimOutline)
+      end
+    end
     ---------------------------------------------------------------------
     ---
     -- Set colors for settings button (transparent base, FX button colors for hover/active)
@@ -6822,7 +6928,7 @@ function loop()
   -- Apply any pending global drag from previous frame before rendering tracks
   if PendingGlobalDragDX and PendingGlobalDragDX ~= 0 then
     FXPane_W = FXPane_W + PendingGlobalDragDX
-    local maxGlobal = VP.w - (OPEN.Snapshots and SnapshotPane_W or 0) - 1
+    local maxGlobal = VP.w - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0) - 1
     if FXPane_W > maxGlobal then FXPane_W = maxGlobal end
     if FXPane_W < 100 then FXPane_W = 100 end
     PendingGlobalDragDX = 0
@@ -6836,7 +6942,7 @@ function loop()
       if not FXPane_IsMaximised then
         PrevFXPane_W   = FXPane_W
       end
-      FXPane_W          = VP.w - 10   -- fill full window minus small gap
+      FXPane_W          = VP.w - (((OPEN.Snapshots or 0) > 0) and (SnapshotPane_W + 3) or 0) - 10   -- fill full window minus snapshot panel + separator (if open) and small gap
       FXPane_IsMaximised = true
 
     elseif (OPEN.ShowSends ~= false) then  -- Sends panel visible again
@@ -6915,24 +7021,48 @@ function loop()
           
           -- Handle linking: either single FX link (NeedLinkFXsID) or multi-FX link (NeedLinkFXsGUIDs)
           local originalGUID = nil
+          local linkedGroupGUIDs = nil
           if NeedLinkFXsGUIDs and MovFX.GUID and MovFX.GUID[i] and NeedLinkFXsGUIDs[MovFX.GUID[i]] then
             -- Multi-selection Ctrl+drag: link each copied FX to its original
             originalGUID = MovFX.GUID[i]
+            -- Check if original is already linked, collect all linked FXs
+            linkedGroupGUIDs = CollectLinkedFXs(originalGUID)
           elseif NeedLinkFXsID then
             -- Single FX Ctrl+drag: use the stored GUID
             originalGUID = NeedLinkFXsID
+            -- Check if FX is already linked, collect all linked FXs
+            linkedGroupGUIDs = CollectLinkedFXs(originalGUID)
           end
           
-          if originalGUID then
+          if originalGUID and linkedGroupGUIDs then
             local Ct = r.TrackFX_GetCount(MovFX.ToTrack[i]) - 1
             local copiedGUID = r.TrackFX_GetFXGUID(MovFX.ToTrack[i], math.min(topos, Ct))
             
             if copiedGUID then
               FX[copiedGUID] = FX[copiedGUID] or {}
-              FX[originalGUID] = FX[originalGUID] or {}
+              
+              -- Ensure originalGUID is in the linked group (in case CollectLinkedFXs returned empty)
+              if not linkedGroupGUIDs[originalGUID] then
+                linkedGroupGUIDs[originalGUID] = true
+              end
+              
+              -- Link the new FX to all FXs in the existing link group
+              -- Since each FX can only store one link, we create a star topology:
+              -- All existing FXs link to the new FX, and the new FX links to the original
+              for groupGUID, _ in pairs(linkedGroupGUIDs) do
+                FX[groupGUID] = FX[groupGUID] or {}
+                -- Update existing FXs to link to the new FX
+                FX[groupGUID].Link = copiedGUID
+                -- Store the link in REAPER's extstate
+                local groupTrack = FindFXFromFxGUID(groupGUID)
+                if groupTrack and groupTrack.trk[1] then
+                  r.GetSetMediaTrackInfo_String(groupTrack.trk[1], 'P_EXT: FX' .. groupGUID .. 'Link to ', copiedGUID, true)
+                end
+              end
+              
+              -- Link the new FX to the original (creating bidirectional link with original)
               FX[copiedGUID].Link = originalGUID
-              FX[originalGUID].Link = copiedGUID
-              r.GetSetMediaTrackInfo_String(MovFX.FromTrack[i], 'P_EXT: FX' .. originalGUID .. 'Link to ', copiedGUID, true)
+              -- Store the link in REAPER's extstate (original track already updated above)
               r.GetSetMediaTrackInfo_String(MovFX.ToTrack[i], 'P_EXT: FX' .. copiedGUID .. 'Link to ', originalGUID, true)
             end
           end
@@ -7080,7 +7210,8 @@ function loop()
     do
       local hoveringMenu = false
       if MultiSelMenuRect then
-        hoveringMenu = im.IsMouseHoveringRect(ctx, MultiSelMenuRect.L, MultiSelMenuRect.T, MultiSelMenuRect.R, MultiSelMenuRect.B)
+        -- Use un-clipped hover test so the menu still counts even if it renders outside the script window (e.g., when sends panel is hidden)
+        hoveringMenu = im.IsMouseHoveringRect(ctx, MultiSelMenuRect.L, MultiSelMenuRect.T, MultiSelMenuRect.R, MultiSelMenuRect.B, false)
       end
       if im.IsMouseClicked(ctx, 0) and not MarqueeSelection.isActive and not InteractingWithSelectedFX and not InteractingWithSelectedSends and not hoveringMenu then
         ClearSelection()
@@ -7428,7 +7559,67 @@ function loop()
           -- If send panel is hidden (globally or per-track), ignore separate width and use global width
           local sendsHidden = (OPEN and OPEN.ShowSends == false) or PerTrackSendsHidden[TrkID]
           local base = (sendsHidden and FXPane_W) or (PerTrackFXPane_W[TrkID] or FXPane_W)
-          local availW = select(1, im.GetContentRegionAvail(ctx)) or (VP.w - (OPEN.Snapshots and SnapshotPane_W or 0))
+
+          -- Special handling for state 1: when sends are hidden globally and snapshots are conditional,
+          -- tracks without snapshots should use full width
+          if sendsHidden and (OPEN.Snapshots or 0) == 1 then
+            Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+            local hasSnapshots = false
+            for _, snap in ipairs(Snapshots[TrkID]) do
+              if snap.chunk then
+                hasSnapshots = true
+                break
+              end
+            end
+            if not hasSnapshots then
+              -- This track doesn't have snapshots, so use full width
+              base = VP.w - 10  -- Full width minus gap
+            end
+          end
+          -- When sends are hidden, explicitly calculate available width accounting for snapshot panel and separator
+          local availW
+          if sendsHidden then
+            -- For state 1, only subtract snapshot panel space if this track will actually show snapshots
+            local snapshotSpace = 0
+            if (OPEN.Snapshots or 0) > 0 then
+              if (OPEN.Snapshots or 0) == 1 then -- State 1: check if this track has snapshots
+                Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+                local hasSnapshots = false
+                for _, snap in ipairs(Snapshots[TrkID]) do
+                  if snap.chunk then
+                    hasSnapshots = true
+                    break
+                  end
+                end
+                if hasSnapshots then
+                  snapshotSpace = SnapshotPane_W + 3
+                end
+              else -- State 2: all tracks show snapshots
+                snapshotSpace = SnapshotPane_W + 3
+              end
+            end
+            availW = VP.w - snapshotSpace
+          else
+            -- For non-hidden sends, use content region avail (similar logic would apply)
+            availW = select(1, im.GetContentRegionAvail(ctx)) or VP.w
+            if (OPEN.Snapshots or 0) > 0 then
+              if (OPEN.Snapshots or 0) == 1 then -- State 1: check if this track has snapshots
+                Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+                local hasSnapshots = false
+                for _, snap in ipairs(Snapshots[TrkID]) do
+                  if snap.chunk then
+                    hasSnapshots = true
+                    break
+                  end
+                end
+                if hasSnapshots then
+                  availW = availW - SnapshotPane_W
+                end
+              else -- State 2: all tracks show snapshots
+                availW = availW - SnapshotPane_W
+              end
+            end
+          end
           local hiddenTarget = math.max(100, (availW or 0) - 5)
           local tween = PerTrackSendsTween and PerTrackSendsTween[TrkID]
           if tween then
@@ -7552,43 +7743,100 @@ function loop()
           end
           FXPane_W = __prevFXPaneW
         end
-        if OPEN.Snapshots then
-          Snapshots_Pane(ctx, Track, TrkID, Trk[t].H - HeightOfs)
-          -- handle to resize snapshot pane
-          local function Snapshot_Reszie_Handle()
-            -- use local track-height variables already in scope
-            im.SameLine(ctx, nil, 0)
-            local btnH = Trk[t].H - HeightOfs
-            im.Button(ctx, '##SnapSep' .. t, 3, btnH)
+        if (OPEN.Snapshots or 0) > 0 then
+          -- Check if snapshots should be shown for this track
+          local shouldShowSnapshots = true
+          local animatingClose = false
+          local animatedWidth = SnapshotPane_W
 
-            if im.IsItemActive(ctx) then
-              -- highlight
-              local L, T = im.GetItemRectMin(ctx)
-              local R, B = im.GetItemRectMax(ctx)
-              im.DrawList_AddRect(im.GetWindowDrawList(ctx), L, T, R, B, getClr(im.Col_ButtonActive))
-
-              local dtX = im.GetMouseDelta(ctx)
-              if Mods == 0 then
-                SnapshotPane_W = SnapshotPane_W + dtX
-                FXPane_W       = FXPane_W - dtX
-                -- clamp
-                if SnapshotPane_W < 60 then
-                  FXPane_W = FXPane_W - (60 - SnapshotPane_W)
-                  SnapshotPane_W = 60
-                end
-                if FXPane_W < 100 then
-                  SnapshotPane_W = SnapshotPane_W - (100 - FXPane_W)
-                  FXPane_W = 100
-                end
+          if (OPEN.Snapshots or 0) == 1 then -- State 1: show only tracks with snapshots
+            local hasSnapshots = false
+            -- Initialize table if needed, then check for actual snapshots
+            Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+            for _, snap in ipairs(Snapshots[TrkID]) do
+              if snap.chunk then
+                hasSnapshots = true
+                break
               end
             end
+            shouldShowSnapshots = hasSnapshots
 
-            if im.IsItemHovered(ctx) or im.IsItemActive(ctx) then
-              im.SetMouseCursor(ctx, im.MouseCursor_ResizeEW)
+            -- Check if this track is animating panel closure
+            if not hasSnapshots and SnapshotPanelCloseAnim[TrkID] then
+              animatingClose = true
+              shouldShowSnapshots = true
+              -- Update animation progress
+              SnapshotPanelCloseAnim[TrkID].progress = math.min(1, (SnapshotPanelCloseAnim[TrkID].progress or 0) + 0.1) -- 10 frames animation
+              animatedWidth = SnapshotPanelCloseAnim[TrkID].width * (1 - SnapshotPanelCloseAnim[TrkID].progress)
+              -- Remove animation when complete
+              if SnapshotPanelCloseAnim[TrkID].progress >= 1 then
+                SnapshotPanelCloseAnim[TrkID] = nil
+                shouldShowSnapshots = false
+              end
             end
+          end
+
+          if shouldShowSnapshots then
+            -- Temporarily override SnapshotPane_W for animation
+            local originalWidth = SnapshotPane_W
+            if animatingClose then
+              SnapshotPane_W = animatedWidth
+            end
+            Snapshots_Pane(ctx, Track, TrkID, Trk[t].H - HeightOfs)
+            -- Restore original width
+            if animatingClose then
+              SnapshotPane_W = originalWidth
+            end
+            -- handle to resize snapshot pane
+            local function Snapshot_Reszie_Handle()
+              -- use local track-height variables already in scope
+              im.SameLine(ctx, nil, 0)
+              local btnH = Trk[t].H - HeightOfs
+              -- During animation, don't show the resize handle
+              if not animatingClose then
+                im.Button(ctx, '##SnapSep' .. t, 3, btnH)
+
+                if im.IsItemActive(ctx) then
+                  -- highlight
+                  local L, T = im.GetItemRectMin(ctx)
+                  local R, B = im.GetItemRectMax(ctx)
+                  im.DrawList_AddRect(im.GetWindowDrawList(ctx), L, T, R, B, getClr(im.Col_ButtonActive))
+
+                  local dtX = im.GetMouseDelta(ctx)
+                  if Mods == 0 then
+                    SnapshotPane_W = SnapshotPane_W + dtX
+                    FXPane_W       = FXPane_W - dtX
+                    -- clamp
+                    if SnapshotPane_W < 60 then
+                      FXPane_W = FXPane_W - (60 - SnapshotPane_W)
+                      SnapshotPane_W = 60
+                    end
+                    if FXPane_W < 100 then
+                      SnapshotPane_W = SnapshotPane_W - (100 - FXPane_W)
+                      FXPane_W = 100
+                    end
+                  end
+                end
+
+                if im.IsItemHovered(ctx) or im.IsItemActive(ctx) then
+                  im.SetMouseCursor(ctx, im.MouseCursor_ResizeEW)
+                end
+              end
+              im.SameLine(ctx, nil, 0)
+            end
+            Snapshot_Reszie_Handle()
+          else
+            -- When snapshots are not shown, advance cursor by the same amount as the snapshots pane would
+            -- to maintain consistent layout for subsequent tracks
+            im.Dummy(ctx, 0, Trk[t].H - HeightOfs)
             im.SameLine(ctx, nil, 0)
           end
-          Snapshot_Reszie_Handle()
+
+          -- Handle case where we're animating the final closure after animation completes
+          if animatingClose and not shouldShowSnapshots and SnapshotPanelCloseAnim[TrkID] then
+            -- Animation completed, clean up
+            SnapshotPanelCloseAnim[TrkID] = nil
+          end
         end
          FX_List()
         function Separator_Reszie_Handle()
@@ -7597,7 +7845,50 @@ function loop()
            -- If send panel is hidden (globally or per-track), ignore separate width and use global width
            local sendsHidden = (OPEN and OPEN.ShowSends == false) or PerTrackSendsHidden[TrkID]
            local baseFXW = (sendsHidden and FXPane_W) or (PerTrackFXPane_W[TrkID] or FXPane_W)
-           local availW = select(1, im.GetContentRegionAvail(ctx)) or (VP.w - (OPEN.Snapshots and SnapshotPane_W or 0))
+           -- When sends are hidden, explicitly calculate available width accounting for snapshot panel and separator
+           local availW
+           if sendsHidden then
+             -- For state 1, only subtract snapshot panel space if this track will actually show snapshots
+             local snapshotSpace = 0
+             if (OPEN.Snapshots or 0) > 0 then
+               if (OPEN.Snapshots or 0) == 1 then -- State 1: check if this track has snapshots
+                 Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+                 local hasSnapshots = false
+                 for _, snap in ipairs(Snapshots[TrkID]) do
+                   if snap.chunk then
+                     hasSnapshots = true
+                     break
+                   end
+                 end
+                 if hasSnapshots then
+                   snapshotSpace = SnapshotPane_W + 3
+                 end
+               else -- State 2: all tracks show snapshots
+                 snapshotSpace = SnapshotPane_W + 3
+               end
+             end
+             availW = VP.w - snapshotSpace
+           else
+             -- For non-hidden sends, use content region avail (similar logic would apply)
+             availW = select(1, im.GetContentRegionAvail(ctx)) or VP.w
+             if (OPEN.Snapshots or 0) > 0 then
+               if (OPEN.Snapshots or 0) == 1 then -- State 1: check if this track has snapshots
+                 Snapshots[TrkID] = Snapshots[TrkID] or { {label = '', chunk = nil} }
+                 local hasSnapshots = false
+                 for _, snap in ipairs(Snapshots[TrkID]) do
+                   if snap.chunk then
+                     hasSnapshots = true
+                     break
+                   end
+                 end
+                 if hasSnapshots then
+                   availW = availW - SnapshotPane_W
+                 end
+               else -- State 2: all tracks show snapshots
+                 availW = availW - SnapshotPane_W
+               end
+             end
+           end
            local hiddenFXW = math.max(100, (availW or 0) - 5)
            local tweenSep = PerTrackSendsTween and PerTrackSendsTween[TrkID]
            local curFXPaneW
@@ -7612,7 +7903,18 @@ function loop()
            else
              curFXPaneW = (sendsHidden and hiddenFXW) or baseFXW
            end
-           Send_W = VP.w - curFXPaneW - (OPEN.Snapshots and SnapshotPane_W or 0)
+           -- Calculate Send_W based on whether snapshots are shown for this track
+           local snapshotWidth = 0
+           if (OPEN.Snapshots or 0) > 0 then
+             if (OPEN.Snapshots or 0) == 1 then -- State 1: check if this track shows snapshots
+               if shouldShowSnapshots then
+                 snapshotWidth = SnapshotPane_W
+               end
+             else -- State 2: all tracks show snapshots
+               snapshotWidth = SnapshotPane_W
+             end
+           end
+           Send_W = VP.w - curFXPaneW - snapshotWidth
            if Send_W < 0 then Send_W = 0 end
            if not sendsHidden and (not tweenSep) and Send_W < MIN_SEND_W then Send_W = MIN_SEND_W end
 
@@ -7678,7 +7980,7 @@ function loop()
               -- If this track already has independent width, allow direct adjustment without Shift
               if PerTrackFXPane_W[TrkID] ~= nil then
                 local minFX = 100
-                local maxFX = VP.w - (OPEN.Snapshots and SnapshotPane_W or 0) - 1
+                local maxFX = VP.w - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0) - 1
                 local newW = PerTrackFXPane_W[TrkID] + DtX
                 if newW < minFX then newW = minFX end
                 if newW > maxFX then newW = maxFX end
@@ -7710,10 +8012,10 @@ function loop()
                   end
                 end
                 -- Check for hide threshold
-                local newSendW = VP.w - newW - (OPEN.Snapshots and SnapshotPane_W or 0)
+                local newSendW = VP.w - newW - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0)
                 local delta = (MIN_SEND_W - newSendW)
                 if newSendW <= MIN_SEND_W then
-                  PerTrackFXPane_W[TrkID] = VP.w - (OPEN.Snapshots and SnapshotPane_W or 0) - MIN_SEND_W
+                  PerTrackFXPane_W[TrkID] = VP.w - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0) - MIN_SEND_W
                   local prev = PerTrackHideOvershoot[TrkID] or 0
                   local next = prev + math.max(0, delta)
                   if HIDE_DRAG_PX and HIDE_DRAG_PX > 0 then next = math.min(next, HIDE_DRAG_PX) end
@@ -7733,7 +8035,7 @@ function loop()
               end
             elseif Mods == Shift then
               local minFX = 100
-              local maxFX = VP.w - (OPEN.Snapshots and SnapshotPane_W or 0) - 1
+              local maxFX = VP.w - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0) - 1
               local cur = PerTrackFXPane_W[TrkID] or FXPane_W
               local newW  = cur + DtX
               if newW < minFX then newW = minFX end
@@ -7766,11 +8068,11 @@ function loop()
                 end
               end
               -- Right-edge threshold: auto-hide Sends when too small (per-track)
-              local newSendW = VP.w - (PerTrackFXPane_W[TrkID] or FXPane_W) - (OPEN.Snapshots and SnapshotPane_W or 0)
+              local newSendW = VP.w - (PerTrackFXPane_W[TrkID] or FXPane_W) - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0)
               local delta = (MIN_SEND_W - newSendW)
               if newSendW <= MIN_SEND_W then
                 -- clamp at MIN_SEND_W
-                PerTrackFXPane_W[TrkID] = VP.w - (OPEN.Snapshots and SnapshotPane_W or 0) - MIN_SEND_W
+                PerTrackFXPane_W[TrkID] = VP.w - (((OPEN.Snapshots or 0) > 0) and SnapshotPane_W or 0) - MIN_SEND_W
                 -- accumulate overshoot (do not reset each frame)
                 local prev = PerTrackHideOvershoot[TrkID] or 0
                 local next = prev + math.max(0, delta)
@@ -8241,7 +8543,7 @@ end
 LoadSnapshotsFromFile()
 
 function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
-  if not OPEN.Snapshots then return end
+  -- This function assumes the caller has already checked if snapshots should be shown for this track
   Snapshots[TrkGUID] = Snapshots[TrkGUID] or { {label = '', chunk = nil} }
   local snaps = Snapshots[TrkGUID]
 
@@ -8377,24 +8679,73 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
     for j = #indicesToRemove, 1, -1 do
       table.remove(snaps, indicesToRemove[j])
     end
+
+    -- If in state 1 and this track now has no snapshots, animate the panel closing
+    -- to prevent accidental FX deletion when Alt+click is used to delete snapshots
+    if (OPEN.Snapshots or 0) == 1 and #indicesToRemove > 0 then
+      local hasRemainingSnapshots = false
+      for _, snap in ipairs(snaps) do
+        if snap.chunk then
+          hasRemainingSnapshots = true
+          break
+        end
+      end
+      if not hasRemainingSnapshots then
+        -- Start animation to close the panel
+        SnapshotPanelCloseAnim[TrkGUID] = { progress = 0, width = SnapshotPane_W }
+      end
+    end
+
     im.EndChild(ctx)
   end
 end
 
 -- Calculate the special index used by REAPER to refer to an FX _inside_ a container.
 -- track           : MediaTrack* that owns the container
--- containerIndex  : FX index (0-based) of the container itself on that track
+-- containerIndex  : FX index (0-based) of the container itself on that track, OR a *container-path index*
+--                   returned by container_item.N for nested containers (>= 0x2000000).
 -- insertPosInside : 1-based position _inside the container_ where the new FX should be
 --                   (1 = first,     currentCount+1 = append at end)
 -- Returns the index value that can be passed to TrackFX_CopyToTrack/TrackFX_AddByName
 -- See REAPER API notes: idx = 0x2000000 + subItem * (FX_Count+1) + (containerIndex+1)
 function Calc_Container_FX_Index(track, containerIndex, insertPosInside)
-  if not track or not containerIndex then return nil end
+  if not track or not containerIndex then 
+    r.ShowConsoleMsg("Calc_Container_FX_Index: ERROR - missing track or containerIndex\n")
+    return nil 
+  end
+  
+  -- IMPORTANT:
+  -- For nested containers, containerIndex may be a "container-path index" (>= 0x2000000) returned by
+  -- TrackFX_GetNamedConfigParm(track, parentContainer, 'container_item.N').
+  -- For path indices, the insertion index is computed by stepping the path by stride (FX_Count+1)
+  -- rather than plugging the path back into the base formula.
+  local fxTotal = r.TrackFX_GetCount(track) or 0
+  local strideTop = fxTotal + 1
+
+  local curCnt = 0
   local ok, cntStr = r.TrackFX_GetNamedConfigParm(track, containerIndex, 'container_count')
-  local curCnt     = tonumber(cntStr) or 0
-  insertPosInside  = insertPosInside or (curCnt + 1)       -- default: append
-  local fxTotal    = r.TrackFX_GetCount(track)              -- FX count **before** addressing container path
-  local idx = 0x2000000 + insertPosInside * (fxTotal + 1) + (containerIndex + 1)
+  if ok then curCnt = tonumber(cntStr) or 0 end
+  insertPosInside = insertPosInside or (curCnt + 1)  -- default: append
+
+  local idx
+  if containerIndex >= 0x2000000 then
+    -- Path index: derive parent container to get its child count, then step by (parentCnt+1)
+    local remainder = (containerIndex - 0x2000000) % strideTop
+    local parentIdx = (remainder > 0) and (remainder - 1) or nil
+    local parentCnt = 0
+    if parentIdx and parentIdx >= 0 then
+      local okp, pcStr = r.TrackFX_GetNamedConfigParm(track, parentIdx, 'container_count')
+      if okp then parentCnt = tonumber(pcStr) or 0 end
+    end
+    local strideLocal = (parentCnt + 1)
+    idx = containerIndex + insertPosInside * strideLocal
+  else
+    -- Top-level container index
+    idx = 0x2000000 + insertPosInside * strideTop + (containerIndex + 1)
+  end
+
+  r.ShowConsoleMsg(string.format("Calc_Container_FX_Index: containerIndex=%d, insertPosInside=%d, fxTotal=%d, curCnt=%d, idx=0x%X (%d)\n",
+    containerIndex, insertPosInside, fxTotal, curCnt, idx, idx))
   return idx
 end
 
@@ -8572,6 +8923,18 @@ function RemoveFXFromSelection(trackGUID, fxIndex)
   end
 end
 
+-- Count total selected FXs across all tracks (fx mode)
+function CountSelectedFXs()
+  if not MarqueeSelection or not MarqueeSelection.selectedFXs then return 0 end
+  local total = 0
+  for _, fxGUIDs in pairs(MarqueeSelection.selectedFXs) do
+    if fxGUIDs and type(fxGUIDs) == 'table' then
+      total = total + #fxGUIDs
+    end
+  end
+  return total
+end
+
 function ShouldSelectFXByYPosition(fxMinY, fxMaxY)
   if not MarqueeSelection.isActive then return false end
   
@@ -8677,6 +9040,29 @@ function BypassSelectedFXs()
   end
   r.Undo_EndBlock('Bypass selected FXs', -1)
   r.PreventUIRefresh(-1)  -- Re-enable UI updates
+end
+
+function DeleteSelectedFXs()
+  local total = CountSelectedFXs()
+  if total == 0 then return end
+  r.PreventUIRefresh(1)
+  -- Don't create undo block here - deletions happen later after animations complete
+  -- Undo block will be created when PendingDeleteGUIDs are processed
+  FXDeleteAnim = FXDeleteAnim or {}
+  for trackGUID, fxGUIDs in pairs(MarqueeSelection.selectedFXs) do
+    local track = GetTrackByGUIDCached(trackGUID)
+    if track and fxGUIDs then
+      for _, guid in ipairs(fxGUIDs) do
+        -- Defer index resolution to deletion time to handle shifting indices when removing multiple FXs
+        if not FXDeleteAnim[guid] then
+          FXDeleteAnim[guid] = { progress = 0, track = track, index = nil }
+        end
+      end
+    end
+  end
+  r.PreventUIRefresh(-1)
+  -- Clear marquee selection after scheduling deletions
+  ClearSelection()
 end
 
 function AddFX_HideWindow(track, fx_name, position)
