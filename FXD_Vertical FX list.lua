@@ -4439,7 +4439,7 @@ local function DrawLicenseUI(ctx, is_modal)
           im.Separator(ctx)
           im.Text(ctx, _0x2e3f() .. ' ' .. _0x4a5b())
           im.Separator(ctx)
-      end
+      end --
     end
     
     if im.BeginTable(ctx, '##LicenseInfo', 2, im.TableFlags_Borders) then
