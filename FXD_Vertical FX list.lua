@@ -260,6 +260,8 @@ Clr={SendHvr = 0x289F8177 ; Send = 0x289F8144 ; VSTi=0x43BB8899 ; VSTi_Hvr =0x43
   ChanBadgeBg             = 0x27463Eff;
   ChanBadgeText           = 0xffffffff;
   PanTextOverlay          = 0xffffff44;
+  PanSliderFill           = 0x43BB8855; -- Pan slider fill color (defaults to PanValue)
+  PanSliderFillAlternative = 0xB0BB4355; -- Alternative color for inverted tracks in mix mode
   ValueRect               = 0x77777777;
   LinkCable               = 0xffffffff;
   -- Hidden parents colors
@@ -287,7 +289,7 @@ local ElementColorKeys = {
   'GenericHighlightFill','GenericHighlightOutline','PatchLine','SendsPreview',
   'SnapshotOverlay',
   'Danger','Attention','ChanBadgeBg','ChanBadgeText','PanTextOverlay',
-  'PanSliderFill','ValueRect','LinkCable', 'PatchLine',
+  'PanSliderFill','PanSliderFillAlternative','ValueRect','LinkCable', 'PatchLine',
   'MenuHover','MenuBarButton',
   'HiddenParentOutline','HiddenParentHover'
 }
@@ -318,6 +320,55 @@ CustomColorsDefault = {
 }
 PanningTracks = {}
 PanningTracks_INV={}
+PanFalloffCurve = 0.0  -- -2.0: logarithmic, 0.0: linear, 2.0: exponential (gradual interpolation)
+
+-- Apply falloff curve to normalized position (0.0 to 1.0)
+local function ApplyFalloffCurve(t, curveValue)
+  -- Clamp curveValue to -2.0 to 2.0 range
+  curveValue = math.max(-2.0, math.min(2.0, curveValue))
+
+  -- Calculate interpolation factors
+  local linearWeight, logWeight, expWeight
+
+  if curveValue >= 0 then
+    -- Interpolate between linear (0.0) and exponential (2.0)
+    local normalizedValue = curveValue / 2.0  -- 0.0 to 1.0
+    linearWeight = 1.0 - normalizedValue
+    logWeight = 0.0
+    expWeight = normalizedValue
+  else
+    -- Interpolate between linear (0.0) and logarithmic (-2.0)
+    local normalizedValue = -curveValue / 2.0  -- 0.0 to 1.0 (since curveValue is negative)
+    linearWeight = 1.0 - normalizedValue
+    logWeight = normalizedValue
+    expWeight = 0.0
+  end
+
+  -- Calculate each curve type
+  local linearResult = t
+
+  local logResult = t
+  if t > 0 and t < 1 then
+    -- Logarithmic - compress lower values, expand higher values
+    logResult = math.log(1 + t * 9) / math.log(10)
+  elseif t >= 1 then
+    logResult = 1
+  end
+
+  local expResult = t
+  if t > 0 and t < 1 then
+    -- Exponential - expand lower values, compress higher values
+    expResult = (10 ^ t - 1) / 9
+  elseif t >= 1 then
+    expResult = 1
+  end
+
+  -- Interpolate between the curves
+  local result = linearResult * linearWeight + logResult * logWeight + expResult * expWeight
+
+  -- Ensure result stays in valid range
+  return math.max(0.0, math.min(1.0, result))
+end
 
 
 
@@ -628,9 +679,7 @@ local function ActivateDevice(licenseKey, deviceId, email)
       escapeJson(deviceId))
   end
   
-  r.ShowConsoleMsg('Device activation payload: ' .. payload .. '\n')
   local cmd = BuildDeviceActivateCurl(payload)
-  r.ShowConsoleMsg('Device activation command: ' .. cmd .. '\n')
   
   -- Use io.popen with proper output capture
   local response = nil
@@ -647,13 +696,8 @@ local function ActivateDevice(licenseKey, deviceId, email)
   end
   
   if not response or response == '' or (type(response) == 'string' and response:match('^%s*$')) then
-    -- Debug: log the command that was executed
-    r.ShowConsoleMsg('Device activation: No response from server. Command: ' .. cmd .. '\n')
     return false, 'No response from device activation server'
   end
-  
-  -- Debug: log the response
-  r.ShowConsoleMsg('Device activation response: ' .. response .. '\n')
   
   -- Extract HTTP status code if present
   local httpCode = response:match('HTTP_CODE:(%d+)')
@@ -678,7 +722,6 @@ local function ActivateDevice(licenseKey, deviceId, email)
     if code and (code < 200 or code >= 300) then
       -- Prefer JSON error message over HTTP code
       local fullError = errorMsg or ('HTTP error ' .. httpCode)
-      r.ShowConsoleMsg('Device activation HTTP error ' .. httpCode .. ': ' .. fullError .. '\n')
       return false, fullError
     end
   end
@@ -690,11 +733,9 @@ local function ActivateDevice(licenseKey, deviceId, email)
   
   if not ok then
     local fullError = errorMsg or ('Device activation failed. Response: ' .. responseToParse:sub(1, 200))
-    r.ShowConsoleMsg('Device activation failed: ' .. fullError .. '\n')
     return false, fullError
   end
   
-  r.ShowConsoleMsg('Device activation successful\n')
   return true, errorMsg or 'Device activated successfully'
 end
 
@@ -870,14 +911,6 @@ local function VerifyLicense(licenseKey)
                      response:match('"deviceCount"%s*:%s*(%d+)')
   if activations then activations = tonumber(activations) end
   
-  -- Debug: log license verification response to see if email is included
-  r.ShowConsoleMsg('License verification response: ' .. response:sub(1, 500) .. '\n')
-  if email then
-    r.ShowConsoleMsg('Email extracted from license verification: ' .. email .. '\n')
-  else
-    r.ShowConsoleMsg('No email found in license verification response\n')
-  end
-  
   if not ok then
     -- Show full response in error for debugging
     local errorMsg = reason or 'Verification failed'
@@ -890,7 +923,6 @@ local function VerifyLicense(licenseKey)
     -- Check if verification failed because device is not activated
     -- If so, try to activate the device and retry verification once
     if errorMsg and (errorMsg:match('Device not activated') or errorMsg:match('device not activated') or errorMsg:match('not activated for this')) then
-      r.ShowConsoleMsg('License verification failed: device not activated. Attempting to activate device...\n')
       
       -- Email is optional - backend should look it up from license key if not provided
       -- Store email from response if available (for future use), but don't require it for activation
@@ -903,7 +935,6 @@ local function VerifyLicense(licenseKey)
       local activateSuccess, activateMsg = ActivateDevice(key, LicenseState.deviceId, email or LicenseState.email)
       
       if activateSuccess then
-        r.ShowConsoleMsg('Device activation successful. Retrying license verification...\n')
         
         -- Retry verification after successful activation
         -- Build the verification request again
@@ -963,7 +994,6 @@ local function VerifyLicense(licenseKey)
             email = retryEmail or email
             activations = retryActivations or activations
             response = retryResponse
-            r.ShowConsoleMsg('License verification successful after device activation.\n')
             -- Continue with normal success flow below
           else
             -- Retry also failed
@@ -976,9 +1006,8 @@ local function VerifyLicense(licenseKey)
           SetLicenseResult('inactive', expiresAt, 'No response from server after device activation', returnedKey or key, activations)
           return false, 'No response from server after device activation'
         end
-      else
+        else
         -- Device activation failed
-        r.ShowConsoleMsg('Device activation failed: ' .. (activateMsg or 'Unknown error') .. '\n')
         SetLicenseResult('inactive', expiresAt, errorMsg .. ' (Device activation also failed: ' .. (activateMsg or 'Unknown error') .. ')', returnedKey or key, activations)
         return false, errorMsg .. ' (Device activation failed: ' .. (activateMsg or 'Unknown error') .. ')'
       end
@@ -1005,7 +1034,6 @@ local function VerifyLicense(licenseKey)
   -- Activate device for tracking (only if verification was successful)
   -- Email is optional - backend will look it up from license key if not provided
   if status == 'active' or status == 'trial' then
-    r.ShowConsoleMsg('Attempting device activation for license: ' .. (returnedKey or key) .. ', device: ' .. (LicenseState.deviceId or 'none') .. '\n')
     local activateSuccess, activateMsg = ActivateDevice(returnedKey or key, LicenseState.deviceId, LicenseState.email)
     if not activateSuccess then
       -- If device activation fails due to 3-device limit, show warning but don't fail license verification
@@ -1013,17 +1041,9 @@ local function VerifyLicense(licenseKey)
         -- Store the error but don't block license usage
         LicenseState.reason = 'License verified, but device activation limit reached: ' .. activateMsg
         SaveLicenseState()
-        r.ShowConsoleMsg('Device activation limit reached: ' .. activateMsg .. '\n')
-      else
-        -- Show other errors to help debug
-        r.ShowConsoleMsg('Device activation failed: ' .. (activateMsg or 'Unknown error') .. '\n')
-        -- Optionally show a message box for non-limit errors to help debug
-        -- r.ShowMessageBox('Device activation failed: ' .. (activateMsg or 'Unknown error'), 'Device Activation', 0)
       end
       -- Device activation failure doesn't prevent license from working
       -- The error is logged but verification still succeeds
-    else
-      r.ShowConsoleMsg('Device activation successful: ' .. (activateMsg or '') .. '\n')
     end
   end
   
@@ -1111,8 +1131,16 @@ end
 LoadLicenseState()
 
 -- Initial license verification on startup
+-- Only verify once per day if license already passes verification
 if LicenseState.licenseKey and LicenseState.licenseKey ~= '' then
-  VerifyLicense(LicenseState.licenseKey)
+  local isCurrentlyValid = LicenseState.status == 'active' or LicenseState.status == 'trial'
+  local timeSinceLastCheck = os.time() - (LicenseState.lastCheck or 0)
+  
+  -- If license is already valid, only verify if it's been more than a day since last check
+  -- If license is not valid or not set, verify immediately
+  if not isCurrentlyValid or timeSinceLastCheck >= LICENSE_CHECK_INTERVAL then
+    VerifyLicense(LicenseState.licenseKey)
+  end
 end
 
 -- License verification is handled by MaybeAutoVerifyLicense() once per day
@@ -2151,9 +2179,23 @@ end
  
   
 local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTracks_INV)
-  if im.IsMouseReleased(ctx, 0 ) then 
-    Pan_Preset_Active = nil 
-    ACTIVE_PAN_V = nil 
+
+  -- While a pan preset is active, mouse wheel adjusts the falloff curve (works for both LMB and RMB mix-mode pan)
+  if Pan_Preset_Active then
+    local wheel = im.GetMouseWheel(ctx)
+    if wheel and wheel ~= 0 then
+      local step = 0.025
+      local inc = (wheel > 0) and step or -step
+      PanFalloffCurve = math.max(-2.0, math.min(2.0, (PanFalloffCurve or 0) + inc))
+      im.SetMouseCursor(ctx, im.MouseCursor_Hand)
+    end
+  end
+
+  local mix = (MIX_MODE or MIX_MODE_Temp) and true or false
+  local shouldEnd = im.IsMouseReleased(ctx, 0) or (mix and im.IsMouseReleased(ctx, 1))
+  if shouldEnd and (Pan_Preset_Active or (PanningTracks and next(PanningTracks)) or ACTIVE_PAN_V) then
+    Pan_Preset_Active = nil
+    ACTIVE_PAN_V = nil
     -- Clear the global tables by removing all key-value pairs
     for k in pairs(PanningTracks) do PanningTracks[k] = nil end
     for k in pairs(PanningTracks_INV) do PanningTracks_INV[k] = nil end
@@ -2194,10 +2236,12 @@ local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTra
               panVal = -maxVal + i * step
             end
           else
-            -- Standard linear interpolation for all other cases
+            -- Standard interpolation for all other cases with falloff curve
             -- Position from 0.0 (first) to 1.0 (last)
             local t = (i - 1) / (cnt - 1)  -- 0.0 to 1.0
-            -- Map to -maxVal to +maxVal (linear cascade)
+            -- Apply falloff curve
+            t = ApplyFalloffCurve(t, PanFalloffCurve)
+            -- Map to -maxVal to +maxVal
             panVal = -maxVal + t * (maxVal * 2)
           end
           
@@ -2233,7 +2277,10 @@ local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTra
           
           -- Calculate magnitude: pair i gets (numPairs - i + 1) / numPairs of maxVal
           -- Pair 1: 100%, Pair 2: (n-1)/n%, Pair 3: (n-2)/n%, etc.
-          local magnitude = maxVal * (numPairs - pairIndex + 1) / numPairs
+          local magnitudeRatio = (numPairs - pairIndex + 1) / numPairs
+          -- Apply falloff curve to the magnitude ratio
+          magnitudeRatio = ApplyFalloffCurve(magnitudeRatio, PanFalloffCurve)
+          local magnitude = maxVal * magnitudeRatio
           
           -- Alternate L/R within each pair: first track goes right, second goes left
           local sign = isFirstInPair and 1 or -1
@@ -2266,7 +2313,11 @@ local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTra
           local pairIdx = math.ceil(i / 2) -- 1,1,2,2,3,3...
           local magnitude
           if pairsCnt > 1 then
-            magnitude = minVal + (pairIdx - 1) * (maxVal - minVal) / (pairsCnt - 1)
+            -- pairIdx=1 should be OUTERMOST (maxVal), last pair should approach minVal
+            local magnitudeRatio = (pairsCnt - pairIdx) / (pairsCnt - 1)  -- 1.0 .. 0.0
+            -- Apply falloff curve
+            magnitudeRatio = ApplyFalloffCurve(magnitudeRatio, PanFalloffCurve)
+            magnitude = minVal + magnitudeRatio * (maxVal - minVal)
           else
             magnitude = maxVal
           end
@@ -5905,6 +5956,7 @@ local function ShowStyleEditor()
       { 'Channel Badge BG', 'ChanBadgeBg' },
       { 'Channel Badge Text', 'ChanBadgeText' },
       { 'Pan Slider Fill', 'PanSliderFill' },
+      { 'Pan Slider Fill Alternative', 'PanSliderFillAlternative' },
       { 'Value Rect Fill', 'ValueRect' },
 
       -- Hidden Elements
@@ -7973,33 +8025,37 @@ function loop()
     end
 
     -- Marquee selection handling with drag detection
-    if im.IsMouseDown(ctx, 1) and not MarqueeSelection.isActive then -- Right mouse button down
-      if MarqueeSelection.initialMouseX == 0 then -- First frame of mouse down
-        local mouseX, mouseY = im.GetMousePos(ctx)
-        MarqueeSelection.initialMouseX = mouseX
-        MarqueeSelection.initialMouseY = mouseY
-        MarqueeSelection.hasDragged = false
-        MarqueeSelection.startingOnVolDrag = false -- Will be set during send rendering
-      else -- Subsequent frames, check for drag
-        local mouseX, mouseY = im.GetMousePos(ctx)
-        local deltaX = math.abs(mouseX - MarqueeSelection.initialMouseX)
-        local deltaY = math.abs(mouseY - MarqueeSelection.initialMouseY)
-        
-        -- Allow immediate start if starting on volume drag area, otherwise use threshold
-        if MarqueeSelection.startingOnVolDrag or deltaX > MarqueeSelection.dragThreshold or deltaY > MarqueeSelection.dragThreshold then
-          MarqueeSelection.hasDragged = true
-          StartMarqueeSelection(ctx)
+    -- In MIX MODE, RMB drag is reserved for panning, so do not start marquee.
+    if not (MIX_MODE or MIX_MODE_Temp) then
+      if im.IsMouseDown(ctx, 1) and not MarqueeSelection.isActive then -- Right mouse button down
+        if MarqueeSelection.initialMouseX == 0 then -- First frame of mouse down
+          local mouseX, mouseY = im.GetMousePos(ctx)
+          MarqueeSelection.initialMouseX = mouseX
+          MarqueeSelection.initialMouseY = mouseY
+          MarqueeSelection.hasDragged = false
+          MarqueeSelection.startingOnVolDrag = false -- Will be set during send rendering
+          MarqueeSelection.blockThisDrag = false -- May be set during send rendering (e.g. mix-mode RMB pan)
+        else -- Subsequent frames, check for drag
+          local mouseX, mouseY = im.GetMousePos(ctx)
+          local deltaX = math.abs(mouseX - MarqueeSelection.initialMouseX)
+          local deltaY = math.abs(mouseY - MarqueeSelection.initialMouseY)
+          
+          -- Allow immediate start if starting on volume drag area, otherwise use threshold
+          if not MarqueeSelection.blockThisDrag and (MarqueeSelection.startingOnVolDrag or deltaX > MarqueeSelection.dragThreshold or deltaY > MarqueeSelection.dragThreshold) then
+            MarqueeSelection.hasDragged = true
+            StartMarqueeSelection(ctx)
+          end
         end
+      elseif MarqueeSelection.isActive then
+        if im.IsMouseDown(ctx, 1) then
+          UpdateMarqueeSelection(ctx)
+        else
+          EndMarqueeSelection(ctx)
+        end
+      elseif im.IsMouseClicked(ctx, 1) and not MarqueeSelection.hasDragged then
+        -- This is a right-click (not a drag), handle it separately
+        -- The actual right-click handling will be done in the individual components
       end
-    elseif MarqueeSelection.isActive then
-      if im.IsMouseDown(ctx, 1) then
-        UpdateMarqueeSelection(ctx)
-      else
-        EndMarqueeSelection(ctx)
-      end
-    elseif im.IsMouseClicked(ctx, 1) and not MarqueeSelection.hasDragged then
-      -- This is a right-click (not a drag), handle it separately
-      -- The actual right-click handling will be done in the individual components
     end
     
     -- Reset drag detection when mouse is released
@@ -8008,6 +8064,7 @@ function loop()
       MarqueeSelection.initialMouseX = 0
       MarqueeSelection.initialMouseY = 0
       MarqueeSelection.startingOnVolDrag = false
+      MarqueeSelection.blockThisDrag = false
     end
 
     -- Preserve marquee interaction when clicking inside last-frame selected send rects (e.g., pan knob)
@@ -8092,13 +8149,25 @@ function loop()
 
 
 
-      WheelV = im.GetMouseWheel(ctx)
-      if WheelV ~= 0 then
-        local windowHWND = r.GetMainHwnd()
-        retval, position, pageSize, min, max, trackPos = r.JS_Window_GetScrollInfo(windowHWND, 'v')
+      -- Handle mouse wheel ONCE per frame (this block runs inside the per-track loop)
+      if t == -1 then
+        WheelV = im.GetMouseWheel(ctx)
+        if WheelV ~= 0 then
+          -- Handle pan preset falloff curve switching when pan presets are active
+          if not Pan_Preset_Active then
+            -- Normal scrolling behavior
+            local windowHWND = r.GetMainHwnd()
+            retval, position, pageSize, min, max, trackPos = r.JS_Window_GetScrollInfo(windowHWND, 'v')
 
-        r.JS_Window_SetScrollPos(windowHWND, 'VERT', math.ceil(position + WheelV))
-        r.UpdateArrange()
+            r.JS_Window_SetScrollPos(windowHWND, 'VERT', math.ceil(position + WheelV))
+            r.UpdateArrange()
+          end
+        end
+      end
+
+      -- Handle mousewheel click (middle click) to reset curve when preset is active
+      if im.IsMouseClicked(ctx, 2) and Pan_Preset_Active then
+        PanFalloffCurve = 0.0
       end
 
       if hide == 0 then 
@@ -8971,9 +9040,81 @@ function loop()
       end
 
 
-       
+
     end
     FOLDER = nil
+
+    -- Show pan preset popup message above first panned track
+    if Pan_Preset_Active and next(PanningTracks) then
+      -- Find the first track (smallest index) in PanningTracks
+      local firstTrackIdx = nil
+      for idx in pairs(PanningTracks) do
+        if not firstTrackIdx or idx < firstTrackIdx then
+          firstTrackIdx = idx
+        end
+      end
+
+      if firstTrackIdx and Trk[firstTrackIdx] and Trk[firstTrackIdx].PosY and Trk[firstTrackIdx].H then
+        -- Get preset name
+        local presetName
+        if Pan_Preset_Active == 1 then
+          presetName = "Linear Cascade"
+        elseif Pan_Preset_Active == 2 then
+          presetName = "Progressive Pairs"
+        elseif Pan_Preset_Active == 3 then
+          presetName = "Opposite Pairs"
+        else
+          presetName = "Pan Preset " .. Pan_Preset_Active
+        end
+
+        -- Get falloff curve description
+        local curveDesc
+        if math.abs(PanFalloffCurve) < 0.05 then
+          curveDesc = "Linear"
+        elseif math.abs(PanFalloffCurve + 2.0) < 0.05 then
+          curveDesc = "Logarithmic"
+        elseif math.abs(PanFalloffCurve - 2.0) < 0.05 then
+          curveDesc = "Exponential"
+        elseif PanFalloffCurve < 0 then
+          curveDesc = string.format("Linear→Log (%.2f)", PanFalloffCurve)
+        else
+          curveDesc = string.format("Linear→Exp (%.2f)", PanFalloffCurve)
+        end
+
+        -- Draw the popup message
+        local dl = im.GetForegroundDrawList(ctx)
+        local text = "Pan Preset: " .. presetName .. " (" .. curveDesc .. ")"
+        
+        im.PushFont(ctx, Font_Andale_Mono_12_B)
+        local textWidth, textHeight = im.CalcTextSize(ctx, text)
+        im.PopFont(ctx)
+
+        local trackY = Trk[firstTrackIdx].PosY + Top_Arrang
+        local trackHeight = Trk[firstTrackIdx].H
+        local popupY = trackY + trackHeight  - textHeight -- Position closer to the track (5px above track top)
+
+
+        -- Background rectangle
+        local padding = 8
+        local windowW = select(1, im.GetWindowSize(ctx))
+        local bgX = windowW - textWidth - padding * 2  -- Align to right edge of window
+        local bgY = popupY - padding
+        local bgW = textWidth + padding * 2
+        local bgH = textHeight + padding * 2
+
+        -- Semi-transparent background
+        im.DrawList_AddRectFilled(dl, bgX, bgY, bgX + bgW, bgY + bgH,
+          im.ColorConvertDouble4ToU32(0.2, 0.2, 0.2, 0.9), 4)
+
+        -- Border
+        im.DrawList_AddRect(dl, bgX, bgY, bgX + bgW, bgY + bgH,
+          im.ColorConvertDouble4ToU32(0.8, 0.8, 0.8, 1.0), 4, nil, 1)
+
+        -- Text
+        im.DrawList_AddText(dl, bgX + padding, bgY + padding,
+          im.ColorConvertDouble4ToU32(1.0, 1.0, 1.0, 1.0), text)
+      end
+    end
 
 
     if im.IsMouseReleased(ctx,0 ) then 

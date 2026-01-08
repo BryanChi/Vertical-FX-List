@@ -90,6 +90,8 @@ return {
       ["ChanBadgeBg"] = 658915071,
       ["ChanBadgeText"] = 4294967295,
       ["PanTextOverlay"] = 4294967108,
+      ["PanSliderFill"] = 291002111,
+      ["PanSliderFillAlternative"] = -2074204587,
       ["ValueRect"] = 2004318071,
       ["LinkCable"] = 4294967295,
       ["PatchLine"] = 4294967261,

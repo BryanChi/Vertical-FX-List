@@ -28,6 +28,7 @@ RecvBtnDragTime = 0  -- Frame counter for receive drag detection
 local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, LockToCenter)
     local retval, pan1, pan2, panmode = r.GetTrackUIPan(Track)
     local IsInv, Active
+    local isMixMode = (MIX_MODE or MIX_MODE_Temp) and true or false
     -- Check if this specific track is inverted
     if PanningTracks_INV[t] == t then
       IsInv = true
@@ -126,6 +127,45 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
     local is_hovered = im.IsItemHovered(ctx)
     local is_active  = im.IsItemActive(ctx)
     local FillClr    = Clr.PanSliderFill or Clr.PanValue
+
+    -- MIX MODE: RMB drag drives pan (replaces Alt+LMB batch gesture)
+    local rmb_pan = false
+    local pan_ctrl_rmb = nil
+    if isMixMode and is_hovered and im.IsMouseDown(ctx, 1) and not DisableFader and not LockToCenter then
+      rmb_pan = true
+      -- Prevent marquee selection from starting while RMB-panning
+      MarqueeSelection = MarqueeSelection or {}
+      MarqueeSelection.blockThisDrag = true
+
+      -- Convert mouse X to pan value (-1..1) over this slider's width
+      local mx = select(1, im.GetMousePos(ctx))
+      local t01 = (SldrW and SldrW > 0 and mx) and ((mx - L) / SldrW) or 0.5
+      if t01 < 0 then t01 = 0 elseif t01 > 1 then t01 = 1 end
+      pan_ctrl_rmb = t01 * 2 - 1
+
+      -- While RMB-panning, allow preset switching + invert toggle without requiring Alt
+      do
+        local newPreset = nil
+        if im.IsKeyPressed(ctx, im.Key_1) then newPreset = 1
+        elseif im.IsKeyPressed(ctx, im.Key_2) then newPreset = 2
+        elseif im.IsKeyPressed(ctx, im.Key_3) then newPreset = 3
+        end
+        if newPreset then
+          if Pan_Preset_Active == newPreset then Pan_Preset_Active = nil else Pan_Preset_Active = newPreset end
+        end
+
+        if Pan_Preset_Active and math.abs(PanFalloffCurve or 0) > 0.0001 and im.IsKeyPressed(ctx, im.Key_C) then
+          PanFalloffCurve = 0.0
+        end
+        local graveKey = im.Key_GraveAccent or im.Key_Backquote or im.Key_Grave
+        if graveKey and im.IsKeyPressed(ctx, graveKey) then
+          Pan_Preset_Active = nil
+        end
+        if im.IsKeyPressed(ctx, im.Key_Z) then
+          if PanningTracks_INV[t] == t then PanningTracks_INV[t] = nil else PanningTracks_INV[t] = t end
+        end
+      end
+    end
     -- accumulate vertical drag (Alt + drag)
     if is_active and Mods == Alt then
       local _, dy = im.GetMouseDelta(ctx)
@@ -134,14 +174,40 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
       end
     end
   
+    -- Determine base color and brightness level based on state
+    local baseClr = Clr.PanSliderFill or Clr.PanValue
+    local brightnessLevel = 0.0  -- no brightening by default
+
     if PanningTracks_INV[t] == t then
-      FillClr = Change_Clr_A(Clr.PanSliderFill or Clr.PanValue_INV, 0.2)
+      -- Track is inverted - use alternative color if in mix mode
+      if (MIX_MODE or MIX_MODE_Temp) then
+        baseClr = Clr.PanSliderFillAlternative or Clr.PanValue_INV
+      else
+        baseClr = Clr.PanSliderFill or Clr.PanValue_INV
+      end
+
+      -- Apply brightness for inverted tracks
+      if is_active or PanningTracks[t] == t then
+        brightnessLevel = 0.4  -- brighter when actively editing inverted track
+      elseif is_hovered then
+        brightnessLevel = 0.2  -- slightly brighter when hovering inverted track
+      else
+        brightnessLevel = 0.3  -- base brightness for inverted tracks
+      end
+    else
+      -- Normal (non-inverted) tracks
+      if is_active or PanningTracks[t] == t then
+        brightnessLevel = 0.4  -- brighter when dragging or batch editing
+      elseif is_hovered then
+        brightnessLevel = 0.2  -- slightly brighter on hover
+      end
     end
-  
-    if is_active or PanningTracks[t] == t then
-      FillClr = Change_Clr_A(Clr.PanSliderFill or Clr.PanValue, 0.2)  -- brighter when dragging
-    elseif is_hovered then
-      FillClr = Change_Clr_A(Clr.PanSliderFill or Clr.PanValue, 0.2)  -- slightly brighter on hover
+
+    -- Apply brightness if needed
+    if brightnessLevel > 0 then
+      FillClr = (LightenColorU32 and LightenColorU32(baseClr, brightnessLevel)) or baseClr
+    else
+      FillClr = baseClr
     end
     local X1 = ValueX > CenterX and ValueX or CenterX
     local X2 = ValueX < CenterX and ValueX or CenterX
@@ -155,7 +221,7 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
     
     -- glow effect while actively dragging, similar to send volume bar
     -- Disable glow when LockToCenter is true (Alt+double-click drag state)
-    if not LockToCenter and (is_active and im.IsMouseDown(ctx, 0) or PanningTracks[t] == t) then
+    if not LockToCenter and ((is_active and im.IsMouseDown(ctx, 0)) or (rmb_pan and im.IsMouseDown(ctx, 1)) or PanningTracks[t] == t) then
       local X = ValueX > CenterX and X1 or  X2
       DrawGlowRect(WDL, X, T+2, X, T + SldrH-2, FillClr, 6, 8)
     end
@@ -173,7 +239,7 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
     
    
     
-    if rv and not DisableFader then 
+    if (rv or rmb_pan) and not DisableFader then 
       PanningTracks[t] = t 
       
       -- If a preset is active, still update ACTIVE_PAN_V from drag (for magnitude control)
@@ -181,12 +247,12 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
       if Pan_Preset_Active then
         -- Return pan_ctrl to update ACTIVE_PAN_V (controls preset magnitude)
         -- The preset will set the actual pan values, so slider position doesn't matter
-        return pan_ctrl
+        return rmb_pan and (pan_ctrl_rmb or 0) or pan_ctrl
       end
   
       r.Undo_BeginBlock()
       --r.SetTrackUIPan( Track, pan_ctrl, false, true, 0) 
-      return pan_ctrl 
+      return rmb_pan and (pan_ctrl_rmb or 0) or pan_ctrl 
   
     end
   
@@ -194,7 +260,10 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
   
    
     if im.IsMouseHoveringRect(ctx, L, T, L+W, T+H )   then 
-      if  ACTIVE_PAN_V and Mods == Alt and im.IsMouseDown(ctx, 0)  then
+      -- In mix mode, RMB drag acts like the batch-panning modifier (no Alt required)
+      -- Don't depend on ACTIVE_PAN_V being non-nil (can be nil on the first RMB-drag frame)
+      local batchHeld = (Mods == Alt and im.IsMouseDown(ctx, 0)) or (isMixMode and im.IsMouseDown(ctx, 1))
+      if batchHeld then
         --r.SetTrackUIPan( Track, ACTIVE_PAN_V, false, true, 0) 
         -- include continuous range between first selected and this track
         local minIndex, maxIndex = t, t
@@ -207,15 +276,37 @@ local function PanFader(ctx,Track, Trk_Height, ACTIVE_PAN_V ,t,DisableFader, Loc
         for i = minIndex, maxIndex do
           PanningTracks[i] = i
         end 
-        if im.IsKeyPressed(ctx, im.Key_1) then
-          Pan_Preset_Active = toggle(Pan_Preset_Active,1)
-        elseif im.IsKeyPressed(ctx, im.Key_2) then
-          Pan_Preset_Active = toggle(Pan_Preset_Active,2)
-        elseif im.IsKeyPressed(ctx, im.Key_3) then
-          Pan_Preset_Active = toggle(Pan_Preset_Active,3)
+        -- Handle preset switching
+        local newPreset = nil
+        if im.IsKeyPressed(ctx, im.Key_1) then newPreset = 1
+        elseif im.IsKeyPressed(ctx, im.Key_2) then newPreset = 2
+        elseif im.IsKeyPressed(ctx, im.Key_3) then newPreset = 3
+        end
+
+        if newPreset then
+          if Pan_Preset_Active == newPreset then
+            -- Same preset pressed: turn off
+            Pan_Preset_Active = nil
+          else
+            -- Different preset pressed: switch to it
+            Pan_Preset_Active = newPreset
+          end
+        end
+
+        -- Handle curve reset with 'C' key (only when preset active and curve not at 0)
+        if Pan_Preset_Active and math.abs(PanFalloffCurve or 0) > 0.0001 and im.IsKeyPressed(ctx, im.Key_C) then
+          PanFalloffCurve = 0.0
+        end
+
+        -- Handle preset deactivation with backtick/grave key
+        do
+          local graveKey = im.Key_GraveAccent or im.Key_Backquote or im.Key_Grave
+          if graveKey and im.IsKeyPressed(ctx, graveKey) then
+            Pan_Preset_Active = nil
+          end
         end
         if im.IsKeyPressed(ctx, im.Key_Z) then 
-          PanningTracks_INV[t] = t 
+          if PanningTracks_INV[t] == t then PanningTracks_INV[t] = nil else PanningTracks_INV[t] = t end
         end
       end
       
@@ -918,7 +1009,9 @@ function Do_Pan_Faders_If_In_MIX_MODE (ctx, Track, t)
     ACTIVE_PAN_V = rv 
   end
   
-  if not im.IsMouseDown(ctx, 0) then ACTIVE_PAN_V = 0 end 
+  if not im.IsMouseDown(ctx, 0) and not ((MIX_MODE or MIX_MODE_Temp) and im.IsMouseDown(ctx, 1)) then
+    ACTIVE_PAN_V = 0
+  end 
 
 end
 
