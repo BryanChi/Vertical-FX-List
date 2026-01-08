@@ -2148,8 +2148,8 @@ local function AutoFocus(ctx)
     FX_LIST_IS_FOCUSED = nil 
   end
 end
-
  
+  
 local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTracks_INV)
   if im.IsMouseReleased(ctx, 0 ) then 
     Pan_Preset_Active = nil 
