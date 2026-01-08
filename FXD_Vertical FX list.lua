@@ -715,11 +715,19 @@ local function DeactivateDevice(licenseKey, deviceId, email)
   end
   
   -- Email is optional - backend can look it up from license key
-  local emailStr = email or ''
-  local payload = string.format('{"email":"%s","licenseKey":"%s","deviceId":"%s"}', 
-    escapeJson(emailStr),
-    escapeJson(licenseKey), 
-    escapeJson(deviceId))
+  -- If email is not provided, omit it from the payload (backend should look it up)
+  local payload
+  if email and email ~= '' then
+    payload = string.format('{"email":"%s","licenseKey":"%s","deviceId":"%s"}', 
+      escapeJson(email),
+      escapeJson(licenseKey), 
+      escapeJson(deviceId))
+  else
+    -- Omit email field - backend should look it up from license key
+    payload = string.format('{"licenseKey":"%s","deviceId":"%s"}', 
+      escapeJson(licenseKey), 
+      escapeJson(deviceId))
+  end
   local cmd = BuildDeviceDeactivateCurl(payload)
   
   -- Use io.popen with proper output capture
@@ -884,8 +892,15 @@ local function VerifyLicense(licenseKey)
     if errorMsg and (errorMsg:match('Device not activated') or errorMsg:match('device not activated') or errorMsg:match('not activated for this')) then
       r.ShowConsoleMsg('License verification failed: device not activated. Attempting to activate device...\n')
       
-      -- Try to activate the device (email is optional, backend can look it up)
-      local activateSuccess, activateMsg = ActivateDevice(key, LicenseState.deviceId, LicenseState.email)
+      -- Email is optional - backend should look it up from license key if not provided
+      -- Store email from response if available (for future use), but don't require it for activation
+      if email and email ~= '' then
+        LicenseState.email = email
+        SaveLicenseState()
+      end
+      
+      -- Try to activate the device (email is optional - backend will look it up from license key)
+      local activateSuccess, activateMsg = ActivateDevice(key, LicenseState.deviceId, email or LicenseState.email)
       
       if activateSuccess then
         r.ShowConsoleMsg('Device activation successful. Retrying license verification...\n')
@@ -988,6 +1003,7 @@ local function VerifyLicense(licenseKey)
   SetLicenseResult(status, expiresAt, reason, returnedKey or key, activations)
   
   -- Activate device for tracking (only if verification was successful)
+  -- Email is optional - backend will look it up from license key if not provided
   if status == 'active' or status == 'trial' then
     r.ShowConsoleMsg('Attempting device activation for license: ' .. (returnedKey or key) .. ', device: ' .. (LicenseState.deviceId or 'none') .. '\n')
     local activateSuccess, activateMsg = ActivateDevice(returnedKey or key, LicenseState.deviceId, LicenseState.email)
@@ -1017,6 +1033,7 @@ end
 local _0x1a2b = {}
 _0x1a2b._0x3c4d = false
 _0x1a2b._0x5e6f = nil
+_0x1a2b._0x5e6f_email = nil  -- Store email for modal license activation
 _0x1a2b._0x7a8b = false
 _0x1a2b._0x9c0d = 0
 _0x1a2b._0x2a3b = false  -- Track if modal was open in previous frame
@@ -1092,6 +1109,11 @@ local function MaybeAutoVerifyLicense()
 end
 
 LoadLicenseState()
+
+-- Initial license verification on startup
+if LicenseState.licenseKey and LicenseState.licenseKey ~= '' then
+  VerifyLicense(LicenseState.licenseKey)
+end
 
 -- License verification is handled by MaybeAutoVerifyLicense() once per day
 
@@ -4532,7 +4554,12 @@ local function DrawLicenseUI(ctx, is_modal)
             LicenseState.licenseKey = nil
             LicenseState.email = nil
             SetLicenseResult('inactive', nil, 'License key removed', nil)
-            if _0x1a2b then _0x1a2b._0x5e6f = nil end
+            if _0x1a2b then 
+                _0x1a2b._0x5e6f = nil 
+                _0x1a2b._0x5e6f_email = nil
+            end
+            OPEN.temp_license_key = nil
+            OPEN.temp_email = nil
         end
     else
         local enterText = _0x9t0u() .. ' ' .. string.char(121, 111, 117, 114) .. ' ' .. _0x2e3f() .. ' ' .. _0x8e9f() .. ' ' .. string.char(116, 111) .. ' ' .. _0x1v2w() .. ':'
@@ -4548,18 +4575,38 @@ local function DrawLicenseUI(ctx, is_modal)
             tempKey = new_key
         end
         
+        im.Spacing(ctx)
+        im.Text(ctx, 'Email (required for activation):')
+        local tempEmail = (is_modal and _0x1a2b and _0x1a2b._0x5e6f_email) or OPEN.temp_email or ''
+        im.SetNextItemWidth(ctx, -1)
+        local emailChanged, new_email = im.InputText(ctx, '##email_input', tempEmail, 256)
+        if emailChanged then
+            -- Trim whitespace from email
+            new_email = new_email:match('^%s*(.-)%s*$')
+            if is_modal and _0x1a2b then _0x1a2b._0x5e6f_email = new_email end
+            OPEN.temp_email = new_email
+            tempEmail = new_email
+        end
+        
         local activateText = _0x3x4y() .. ' ' .. _0x2e3f()
         if im.Button(ctx, activateText, -1, 0) and tempKey ~= '' then
+            -- Store email in LicenseState before verification so it's available for activation
+            if tempEmail and tempEmail ~= '' then
+                LicenseState.email = tempEmail
+                SaveLicenseState()
+            end
             local success, msg = VerifyLicense(tempKey)
             if success then
                 _0x1a2b._0x7a8b = true
                 _0x1a2b._0x9c0d = 0
                 if is_modal and _0x1a2b then 
                     _0x1a2b._0x5e6f = nil 
+                    _0x1a2b._0x5e6f_email = nil
                     _0x1a2b._0x3c4d = false
                     im.CloseCurrentPopup(ctx)
                 end
                 OPEN.temp_license_key = nil
+                OPEN.temp_email = nil
             else
                 local failTitle = _0x2e3f() .. ' ' .. string.char(65, 99, 116, 105, 118, 97, 116, 105, 111, 110)
                 local failMsg = string.char(76, 105, 99, 101, 110, 115, 101, 32, 97, 99, 116, 105, 118, 97, 116, 105, 111, 110, 32, 102, 97, 105, 108, 101, 100, 58, 10, 10) .. (msg or string.char(85, 110, 107, 110, 111, 119, 110, 32, 101, 114, 114, 111, 114))
