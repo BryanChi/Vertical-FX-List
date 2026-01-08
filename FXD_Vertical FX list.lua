@@ -13,8 +13,8 @@ local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
-local FunctionFolder = r.GetResourcePath() ..
-    '/Scripts/ReaTeam Scripts/Tracks Properties/bryanchi_FXD - Vertical FX List/Functions/'
+local script_path = debug.getinfo(1, 'S').source:match('@?(.*/)')
+local FunctionFolder = script_path .. 'Vertical FX List Resources/Functions/'
 
 dofile(FunctionFolder .. 'General functions.lua')
 --[[ arrange_hwnd  = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 0x3E8) -- client position
@@ -269,6 +269,10 @@ Clr={SendHvr = 0x289F8177 ; Send = 0x289F8144 ; VSTi=0x43BB8899 ; VSTi_Hvr =0x43
   MenuHover               = 0x555555ff; -- menu item hover (defaults to same as ButtonsHvr)
   -- Menu bar button base color (hover/active derived from this)
   MenuBarButton           = 0x00000000; -- transparent by default, user can customize
+  -- Resize grip (corner triangle) colors
+  ResizeGrip              = 0x2D4F47FF; -- resize grip normal state
+  ResizeGripHovered       = 0x2D4F47FF; -- resize grip hovered state
+  ResizeGripActive        = 0x2D4F47FF; -- resize grip active/dragging state
 }
 
 -- Global outline color used by highlight helpers
@@ -283,7 +287,7 @@ local ElementColorKeys = {
   'GenericHighlightFill','GenericHighlightOutline','PatchLine','SendsPreview',
   'SnapshotOverlay',
   'Danger','Attention','ChanBadgeBg','ChanBadgeText','PanTextOverlay',
-  'ValueRect','LinkCable', 'PatchLine',
+  'PanSliderFill','ValueRect','LinkCable', 'PatchLine',
   'MenuHover','MenuBarButton',
   'HiddenParentOutline','HiddenParentHover'
 }
@@ -405,6 +409,8 @@ end
 local LICENSE_SECTION = 'FXD_Vertical_FX_List_License'
 -- Set to your deployed website domain (Vercel/Netlify/etc)
 local LICENSE_VERIFY_URL = 'https://coolreaperscripts.com/api/license/verify'
+local DEVICE_ACTIVATE_URL = 'https://coolreaperscripts.com/api/device?action=activate'
+local DEVICE_DEACTIVATE_URL = 'https://coolreaperscripts.com/api/device?action=deactivate'
 local LICENSE_CHECK_INTERVAL = 24 * 60 * 60 -- seconds
 
 LicenseState = LicenseState or {
@@ -413,6 +419,8 @@ LicenseState = LicenseState or {
   reason = nil,
   licenseKey = nil,
   deviceId = nil,        -- Unique device identifier
+  email = nil,           -- User email (extracted from license verification)
+  activations = nil,     -- Number of active device activations (if provided by API)
   lastCheck = 0,
   checking = false
 }
@@ -486,6 +494,10 @@ local function LoadLicenseState()
   if key ~= '' then LicenseState.licenseKey = key end
   local deviceId = r.GetExtState(LICENSE_SECTION, 'deviceId')
   if deviceId ~= '' then LicenseState.deviceId = deviceId end
+  local email = r.GetExtState(LICENSE_SECTION, 'email')
+  if email ~= '' then LicenseState.email = email end
+  local activations = tonumber(r.GetExtState(LICENSE_SECTION, 'activations'))
+  if activations then LicenseState.activations = activations end
   local last = tonumber(r.GetExtState(LICENSE_SECTION, 'lastCheck'))
   if last then LicenseState.lastCheck = last end
   
@@ -501,14 +513,17 @@ local function SaveLicenseState()
   r.SetExtState(LICENSE_SECTION, 'reason', LicenseState.reason or '', true)
   r.SetExtState(LICENSE_SECTION, 'licenseKey', LicenseState.licenseKey or '', true)
   r.SetExtState(LICENSE_SECTION, 'deviceId', LicenseState.deviceId or '', true)
+  r.SetExtState(LICENSE_SECTION, 'email', LicenseState.email or '', true)
+  r.SetExtState(LICENSE_SECTION, 'activations', tostring(LicenseState.activations or ''), true)
   r.SetExtState(LICENSE_SECTION, 'lastCheck', tostring(LicenseState.lastCheck or 0), true)
 end
 
-local function SetLicenseResult(status, expiresAt, reason, licenseKey)
+local function SetLicenseResult(status, expiresAt, reason, licenseKey, activations)
   LicenseState.status = status
   LicenseState.expiresAt = expiresAt
   LicenseState.reason = reason
   LicenseState.licenseKey = licenseKey
+  LicenseState.activations = activations or LicenseState.activations
   LicenseState.lastCheck = os.time()
   SaveLicenseState()
 end
@@ -538,6 +553,208 @@ local function BuildLicenseCurl(payload)
       LICENSE_VERIFY_URL
     )
   end
+end
+
+local function BuildDeviceActivateCurl(payload)
+  if OS:match('Win') then
+    return string.format(
+      'curl -L -s -w "\\nHTTP_CODE:%%{http_code}" -X POST -H "Content-Type: application/json" -d "%s" "%s"',
+      payload:gsub('"', '\\"'),
+      DEVICE_ACTIVATE_URL
+    )
+  else
+    -- On macOS/Linux, use full path and proper escaping
+    return string.format(
+      "/usr/bin/curl -L -s -w '\\nHTTP_CODE:%%{http_code}' -X POST -H 'Content-Type: application/json' -d %q %q",
+      payload,
+      DEVICE_ACTIVATE_URL
+    )
+  end
+end
+
+local function BuildDeviceDeactivateCurl(payload)
+  if OS:match('Win') then
+    return string.format(
+      'curl -L -s -X POST -H "Content-Type: application/json" -d "%s" "%s"',
+      payload:gsub('"', '\\"'),
+      DEVICE_DEACTIVATE_URL
+    )
+  else
+    -- On macOS/Linux, use full path and proper escaping
+    return string.format(
+      "/usr/bin/curl -L -s -X POST -H 'Content-Type: application/json' -d %q %q",
+      payload,
+      DEVICE_DEACTIVATE_URL
+    )
+  end
+end
+
+-- Activate device for license tracking
+local function ActivateDevice(licenseKey, deviceId, email)
+  if not licenseKey or licenseKey == '' then
+    return false, 'License key required'
+  end
+  
+  if not deviceId or deviceId == '' then
+    return false, 'Device ID required'
+  end
+  
+  -- Email is optional - backend can look it up from license key
+
+  -- Test if curl is available
+  local curl_test = r.ExecProcess('curl --version', 2000)
+  if not curl_test or curl_test == '' then
+    return false, 'curl not found. Please install curl or use a system with curl available.'
+  end
+  
+  -- Escape JSON values properly
+  local function escapeJson(str)
+    if not str then return '' end
+    return tostring(str):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
+  end
+  
+  -- Email is optional - backend can look it up from license key
+  -- If email is not provided, omit it from the payload (backend should look it up)
+  local payload
+  if email and email ~= '' then
+    payload = string.format('{"email":"%s","licenseKey":"%s","deviceId":"%s"}', 
+      escapeJson(email),
+      escapeJson(licenseKey), 
+      escapeJson(deviceId))
+  else
+    -- Omit email field - backend should look it up from license key
+    payload = string.format('{"licenseKey":"%s","deviceId":"%s"}', 
+      escapeJson(licenseKey), 
+      escapeJson(deviceId))
+  end
+  
+  r.ShowConsoleMsg('Device activation payload: ' .. payload .. '\n')
+  local cmd = BuildDeviceActivateCurl(payload)
+  r.ShowConsoleMsg('Device activation command: ' .. cmd .. '\n')
+  
+  -- Use io.popen with proper output capture
+  local response = nil
+  local handle = io.popen(cmd, 'r')
+  if handle then
+    local lines = {}
+    for line in handle:lines() do
+      table.insert(lines, line)
+    end
+    response = table.concat(lines, '\n')
+    handle:close()
+  else
+    response = r.ExecProcess(cmd, 10000)
+  end
+  
+  if not response or response == '' or (type(response) == 'string' and response:match('^%s*$')) then
+    -- Debug: log the command that was executed
+    r.ShowConsoleMsg('Device activation: No response from server. Command: ' .. cmd .. '\n')
+    return false, 'No response from device activation server'
+  end
+  
+  -- Debug: log the response
+  r.ShowConsoleMsg('Device activation response: ' .. response .. '\n')
+  
+  -- Extract HTTP status code if present
+  local httpCode = response:match('HTTP_CODE:(%d+)')
+  local jsonResponse = response:gsub('HTTP_CODE:%d+', ''):match('^%s*(.-)%s*$')  -- Remove HTTP_CODE line and trim
+  
+  -- Use jsonResponse if we extracted HTTP code, otherwise use original response
+  local responseToParse = jsonResponse ~= '' and jsonResponse or response
+  
+  -- Parse JSON response
+  local ok = responseToParse:match('"ok"%s*:%s*true') ~= nil or 
+             responseToParse:match('"ok"%s*:%s*True') ~= nil or
+             responseToParse:match('"success"%s*:%s*true') ~= nil or
+             responseToParse:match('"success"%s*:%s*True') ~= nil
+  
+  local errorMsg = responseToParse:match('"error"%s*:%s*"([^"]+)"') or 
+                   responseToParse:match('"message"%s*:%s*"([^"]+)"') or
+                   responseToParse:match('"reason"%s*:%s*"([^"]+)"')
+  
+  -- Check HTTP status code after parsing JSON to get error message
+  if httpCode then
+    local code = tonumber(httpCode)
+    if code and (code < 200 or code >= 300) then
+      -- Prefer JSON error message over HTTP code
+      local fullError = errorMsg or ('HTTP error ' .. httpCode)
+      r.ShowConsoleMsg('Device activation HTTP error ' .. httpCode .. ': ' .. fullError .. '\n')
+      return false, fullError
+    end
+  end
+  
+  -- If HTTP code is 200-299 and no explicit ok/success field, assume success
+  if httpCode and tonumber(httpCode) >= 200 and tonumber(httpCode) < 300 and not ok and not errorMsg then
+    ok = true
+  end
+  
+  if not ok then
+    local fullError = errorMsg or ('Device activation failed. Response: ' .. responseToParse:sub(1, 200))
+    r.ShowConsoleMsg('Device activation failed: ' .. fullError .. '\n')
+    return false, fullError
+  end
+  
+  r.ShowConsoleMsg('Device activation successful\n')
+  return true, errorMsg or 'Device activated successfully'
+end
+
+-- Deactivate device for license tracking
+local function DeactivateDevice(licenseKey, deviceId, email)
+  if not licenseKey or licenseKey == '' then
+    return false, 'License key required'
+  end
+  
+  if not deviceId or deviceId == '' then
+    return false, 'Device ID required'
+  end
+  
+  -- Escape JSON values properly
+  local function escapeJson(str)
+    if not str then return '' end
+    return tostring(str):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
+  end
+  
+  -- Email is optional - backend can look it up from license key
+  local emailStr = email or ''
+  local payload = string.format('{"email":"%s","licenseKey":"%s","deviceId":"%s"}', 
+    escapeJson(emailStr),
+    escapeJson(licenseKey), 
+    escapeJson(deviceId))
+  local cmd = BuildDeviceDeactivateCurl(payload)
+  
+  -- Use io.popen with proper output capture
+  local response = nil
+  local handle = io.popen(cmd, 'r')
+  if handle then
+    local lines = {}
+    for line in handle:lines() do
+      table.insert(lines, line)
+    end
+    response = table.concat(lines, '\n')
+    handle:close()
+  else
+    response = r.ExecProcess(cmd, 10000)
+  end
+  
+  if not response or response == '' or (type(response) == 'string' and response:match('^%s*$')) then
+    return false, 'No response from device deactivation server'
+  end
+  
+  -- Parse JSON response
+  local ok = response:match('"ok"%s*:%s*true') ~= nil or 
+             response:match('"ok"%s*:%s*True') ~= nil or
+             response:match('"success"%s*:%s*true') ~= nil or
+             response:match('"success"%s*:%s*True') ~= nil
+  
+  local errorMsg = response:match('"error"%s*:%s*"([^"]+)"') or 
+                   response:match('"message"%s*:%s*"([^"]+)"') or
+                   response:match('"reason"%s*:%s*"([^"]+)"')
+  
+  if not ok then
+    return false, errorMsg or 'Device deactivation failed'
+  end
+  
+  return true, errorMsg or 'Device deactivated successfully'
 end
 
 local function VerifyLicense(licenseKey)
@@ -639,6 +856,19 @@ local function VerifyLicense(licenseKey)
                  response:match('"message"%s*:%s*"([^"]+)"') or
                  response:match('"error"%s*:%s*"([^"]+)"')
   local returnedKey = response:match('"licenseKey"%s*:%s*"([^"]+)"')
+  local email = response:match('"email"%s*:%s*"([^"]+)"')
+  local activations = response:match('"activations"%s*:%s*(%d+)') or
+                     response:match('"activeDevices"%s*:%s*(%d+)') or
+                     response:match('"deviceCount"%s*:%s*(%d+)')
+  if activations then activations = tonumber(activations) end
+  
+  -- Debug: log license verification response to see if email is included
+  r.ShowConsoleMsg('License verification response: ' .. response:sub(1, 500) .. '\n')
+  if email then
+    r.ShowConsoleMsg('Email extracted from license verification: ' .. email .. '\n')
+  else
+    r.ShowConsoleMsg('No email found in license verification response\n')
+  end
   
   if not ok then
     -- Show full response in error for debugging
@@ -648,8 +878,100 @@ local function VerifyLicense(licenseKey)
       local responsePreview = response:sub(1, 200)
       errorMsg = 'Verification failed. Server response: ' .. responsePreview
     end
-    SetLicenseResult('inactive', expiresAt, errorMsg, returnedKey or key)
-    return false, errorMsg
+    
+    -- Check if verification failed because device is not activated
+    -- If so, try to activate the device and retry verification once
+    if errorMsg and (errorMsg:match('Device not activated') or errorMsg:match('device not activated') or errorMsg:match('not activated for this')) then
+      r.ShowConsoleMsg('License verification failed: device not activated. Attempting to activate device...\n')
+      
+      -- Try to activate the device (email is optional, backend can look it up)
+      local activateSuccess, activateMsg = ActivateDevice(key, LicenseState.deviceId, LicenseState.email)
+      
+      if activateSuccess then
+        r.ShowConsoleMsg('Device activation successful. Retrying license verification...\n')
+        
+        -- Retry verification after successful activation
+        -- Build the verification request again
+        local retryPayload = string.format('{"licenseKey":"%s","deviceId":"%s"}', 
+          escapeJson(key), 
+          escapeJson(LicenseState.deviceId))
+        local retryCmd = BuildLicenseCurl(retryPayload)
+        
+        LicenseState.checking = true
+        local retryResponse = nil
+        local retryHandle = io.popen(retryCmd, 'r')
+        if retryHandle then
+          local retryLines = {}
+          for line in retryHandle:lines() do
+            table.insert(retryLines, line)
+          end
+          retryResponse = table.concat(retryLines, '\n')
+          retryHandle:close()
+        else
+          retryResponse = r.ExecProcess(retryCmd, 10000)
+        end
+        LicenseState.checking = false
+        
+        -- Parse retry response
+        if retryResponse and retryResponse ~= '' then
+          local retryOk = retryResponse:match('"ok"%s*:%s*true') ~= nil or 
+                         retryResponse:match('"ok"%s*:%s*True') ~= nil or
+                         retryResponse:match('"success"%s*:%s*true') ~= nil or
+                         retryResponse:match('"success"%s*:%s*True') ~= nil
+          
+          local retryStatus = retryResponse:match('"status"%s*:%s*"([^"]+)"')
+          local retryExpiresAtStr = retryResponse:match('"expiresAt"%s*:%s*([^,}]+)')
+          local retryExpiresAt = nil
+          if retryExpiresAtStr then
+            retryExpiresAtStr = retryExpiresAtStr:match('^%s*(.-)%s*$')
+            if retryExpiresAtStr ~= 'null' and retryExpiresAtStr ~= 'nil' then
+              retryExpiresAt = tonumber(retryExpiresAtStr)
+            end
+          end
+          local retryReason = retryResponse:match('"reason"%s*:%s*"([^"]+)"') or 
+                             retryResponse:match('"message"%s*:%s*"([^"]+)"') or
+                             retryResponse:match('"error"%s*:%s*"([^"]+)"')
+          local retryReturnedKey = retryResponse:match('"licenseKey"%s*:%s*"([^"]+)"')
+          local retryEmail = retryResponse:match('"email"%s*:%s*"([^"]+)"')
+          local retryActivations = retryResponse:match('"activations"%s*:%s*(%d+)') or
+                                   retryResponse:match('"activeDevices"%s*:%s*(%d+)') or
+                                   retryResponse:match('"deviceCount"%s*:%s*(%d+)')
+          if retryActivations then retryActivations = tonumber(retryActivations) end
+          
+          if retryOk then
+            -- Retry succeeded, use retry response
+            ok = retryOk
+            status = retryStatus
+            expiresAt = retryExpiresAt
+            reason = retryReason
+            returnedKey = retryReturnedKey or returnedKey
+            email = retryEmail or email
+            activations = retryActivations or activations
+            response = retryResponse
+            r.ShowConsoleMsg('License verification successful after device activation.\n')
+            -- Continue with normal success flow below
+          else
+            -- Retry also failed
+            local retryErrorMsg = retryReason or 'Verification failed after device activation'
+            SetLicenseResult('inactive', retryExpiresAt, retryErrorMsg, retryReturnedKey or key, retryActivations)
+            return false, retryErrorMsg
+          end
+        else
+          -- No response on retry
+          SetLicenseResult('inactive', expiresAt, 'No response from server after device activation', returnedKey or key, activations)
+          return false, 'No response from server after device activation'
+        end
+      else
+        -- Device activation failed
+        r.ShowConsoleMsg('Device activation failed: ' .. (activateMsg or 'Unknown error') .. '\n')
+        SetLicenseResult('inactive', expiresAt, errorMsg .. ' (Device activation also failed: ' .. (activateMsg or 'Unknown error') .. ')', returnedKey or key, activations)
+        return false, errorMsg .. ' (Device activation failed: ' .. (activateMsg or 'Unknown error') .. ')'
+      end
+    else
+      -- Verification failed for other reasons (not device activation)
+      SetLicenseResult('inactive', expiresAt, errorMsg, returnedKey or key, activations)
+      return false, errorMsg
+    end
   end
 
   -- Ensure status is set
@@ -657,7 +979,38 @@ local function VerifyLicense(licenseKey)
     status = 'active'  -- Default to active if ok is true but status is missing
   end
   
-  SetLicenseResult(status, expiresAt, reason, returnedKey or key)
+  -- Store email if provided
+  if email and email ~= '' then
+    LicenseState.email = email
+    SaveLicenseState()
+  end
+  
+  SetLicenseResult(status, expiresAt, reason, returnedKey or key, activations)
+  
+  -- Activate device for tracking (only if verification was successful)
+  if status == 'active' or status == 'trial' then
+    r.ShowConsoleMsg('Attempting device activation for license: ' .. (returnedKey or key) .. ', device: ' .. (LicenseState.deviceId or 'none') .. '\n')
+    local activateSuccess, activateMsg = ActivateDevice(returnedKey or key, LicenseState.deviceId, LicenseState.email)
+    if not activateSuccess then
+      -- If device activation fails due to 3-device limit, show warning but don't fail license verification
+      if activateMsg and activateMsg:match('maximum of 3 active devices') then
+        -- Store the error but don't block license usage
+        LicenseState.reason = 'License verified, but device activation limit reached: ' .. activateMsg
+        SaveLicenseState()
+        r.ShowConsoleMsg('Device activation limit reached: ' .. activateMsg .. '\n')
+      else
+        -- Show other errors to help debug
+        r.ShowConsoleMsg('Device activation failed: ' .. (activateMsg or 'Unknown error') .. '\n')
+        -- Optionally show a message box for non-limit errors to help debug
+        -- r.ShowMessageBox('Device activation failed: ' .. (activateMsg or 'Unknown error'), 'Device Activation', 0)
+      end
+      -- Device activation failure doesn't prevent license from working
+      -- The error is logged but verification still succeeds
+    else
+      r.ShowConsoleMsg('Device activation successful: ' .. (activateMsg or '') .. '\n')
+    end
+  end
+  
   return true, status
 end
 
@@ -740,12 +1093,7 @@ end
 
 LoadLicenseState()
 
--- Check license on startup if license key exists
-if LicenseState.licenseKey and LicenseState.licenseKey ~= '' then
-  if os.time() - LicenseState.lastCheck > 3600 then
-    VerifyLicense(LicenseState.licenseKey)
-  end
-end
+-- License verification is handled by MaybeAutoVerifyLicense() once per day
 
 
 if OPEN.ShortenFXNames == nil then OPEN.ShortenFXNames = true end
@@ -758,6 +1106,12 @@ ShowSendPanKnobs = LoadGlobalBool('ShowSendPanKnobs', false)
 
 -- Show favorite FXs under search bar (global persistent)
 ShowFavoritesUnderSearchBar = LoadGlobalBool('ShowFavoritesUnderSearchBar', false)
+
+-- Tint FX buttons with parent container color (global persistent)
+TintFXBtnsWithParentContainerColor = LoadGlobalBool('TintFXBtnsWithParentContainerColor', false)
+
+-- Tint container button color (global persistent)
+TintContainerButtonColor = LoadGlobalBool('TintContainerButtonColor', true)
 
 -- Monitor FX columns (global persistent, 1-6)
 MonitorFX_Columns = LoadGlobalNumber('MonitorFX_Columns', 1)
@@ -2099,7 +2453,12 @@ local function MonitorFXs(ctx, Top_Arrang)
   Top_Arrang = Top_Arrang or 0
 
   im.BeginChild(ctx, 'Montitor FXs', -1, Top_Arrang, nil, im.WindowFlags_NoScrollbar )
-  local ct = r.TrackFX_GetCount(Mas)
+  
+  -- Style improvements: Spacing and Rounding
+  local item_spacing = 5
+  im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, item_spacing, item_spacing)
+  im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 5)
+
   local cols = MonitorFX_Columns or 1
   if cols < 1 then cols = 1 end
   if cols > 6 then cols = 6 end
@@ -2109,7 +2468,7 @@ local function MonitorFXs(ctx, Top_Arrang)
   -- Calculate fixed button width based on columns
   local btnWidth = -1
   if cols > 1 then
-    local spacing = 6 * (cols - 1)
+    local spacing = item_spacing * (cols - 1)
     btnWidth = (childWidth - spacing) / cols
   end
   -- For single column, btnWidth stays -1 (full width)
@@ -2122,7 +2481,7 @@ local function MonitorFXs(ctx, Top_Arrang)
     if rv then 
       -- Layout in columns: use SameLine for items after the first in each row
       if fxCount > 0 and (fxCount % cols) ~= 0 then
-        im.SameLine(ctx, 0, 6)
+        im.SameLine(ctx)
       end
       
       im.SetNextItemWidth(ctx, btnWidth)
@@ -2201,7 +2560,7 @@ local function MonitorFXs(ctx, Top_Arrang)
           local L, T = im.GetItemRectMin(ctx)
           local R, B = im.GetItemRectMax(ctx)
           local WDL = im.GetWindowDrawList(ctx)
-          im.DrawList_AddRectFilled(WDL, L, T, R, B, 0x000000aa)
+          im.DrawList_AddRectFilled(WDL, L, T, R, B, 0x000000aa, 5) -- Add rounding to overlay to match button
         end
         
         FX_Btn_Mouse_Interaction(rv, Mas, fx, r.TrackFX_GetOpen(Mas, fx), FX_Offline, ctx)
@@ -2210,6 +2569,9 @@ local function MonitorFXs(ctx, Top_Arrang)
       fxCount = fxCount + 1
     end
   end
+  
+  im.PopStyleVar(ctx, 2) -- ItemSpacing, FrameRounding
+  
   im.EndChild(ctx)
   if im.IsWindowDocked( ctx) then
     w,  MonitorFX_Height = im.GetWindowSize( ctx)
@@ -3680,9 +4042,13 @@ function DrawXIndicator(ctx, size, color)
     color, 2)
 end
 
-local function Change_Clr_Alpha(CLR, HowMuch)
+local function Change_Clr_Alpha(CLR, HowMuch, SET)
   local R, G, B, A = im.ColorConvertU32ToDouble4(CLR)
-  local A = SetMinMax(A + HowMuch, 0, 1)
+  if SET then 
+    A = SET
+  else
+    A = SetMinMax(A + HowMuch, 0, 1)
+  end
   return im.ColorConvertDouble4ToU32(R, G, B, A)
 end
 -- Draw a soft glow around a rectangle.
@@ -3836,6 +4202,22 @@ function FindFXFromFxGUID(FxID_To_Find)
       if FxID_To_Find == FxID then
         table.insert(out.fx, fx)
         table.insert(out.trk, trk)
+      end
+      -- Also check inside containers
+      local _, cntStr = r.TrackFX_GetNamedConfigParm(trk, fx, 'container_count')
+      if cntStr then
+        local curCnt = tonumber(cntStr) or 0
+        for j = 0, curCnt - 1 do
+          local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(trk, fx, 'container_item.' .. j)))
+          if childIdx and childIdx >= 0x2000000 then
+            -- This is a container path index, check GUID directly
+            local childFxID = r.TrackFX_GetFXGUID(trk, childIdx)
+            if childFxID == FxID_To_Find then
+              table.insert(out.fx, childIdx)
+              table.insert(out.trk, trk)
+            end
+          end
+        end
       end
     end
   end
@@ -4060,7 +4442,7 @@ local function DrawLicenseUI(ctx, is_modal)
       end
     end
     
-    if im.BeginTable(ctx, '##LicenseInfo', 2, im.TableFlags_Borders | im.TableFlags_RowBg) then
+    if im.BeginTable(ctx, '##LicenseInfo', 2, im.TableFlags_Borders) then
         im.TableSetupColumn(ctx, 'Label', im.TableColumnFlags_WidthFixed, 100)
         im.TableSetupColumn(ctx, 'Value', im.TableColumnFlags_WidthStretch)
         
@@ -4069,9 +4451,9 @@ local function DrawLicenseUI(ctx, is_modal)
         im.Text(ctx, _0x2e3f() .. ' ' .. _0x8e9f() .. ':')
         im.TableSetColumnIndex(ctx, 1)
         if LicenseState.licenseKey and LicenseState.licenseKey ~= '' then
-            im.TextColored(ctx, 0x5EFF63FF, LicenseState.licenseKey)
+            im.Text(ctx, LicenseState.licenseKey)
         else
-            im.TextColored(ctx, 0xAAAAAAFF, _0x9j0k())
+            im.Text(ctx, _0x9j0k())
         end
         
         im.TableNextRow(ctx)
@@ -4079,15 +4461,7 @@ local function DrawLicenseUI(ctx, is_modal)
         im.Text(ctx, _0x1a2c() .. ':')
         im.TableSetColumnIndex(ctx, 1)
         local statusText = LicenseStatusText()
-        local statusColor = 0xFFFFFFFF
-        if LicenseState.status == 'expired' or LicenseState.status == 'inactive' then
-            statusColor = 0xFF4444FF
-        elseif LicenseState.status == 'trial' then
-            statusColor = 0xFFFF44FF
-        elseif LicenseState.status == 'active' then
-            statusColor = 0x5EFF63FF
-        end
-        im.TextColored(ctx, statusColor, statusText)
+        im.Text(ctx, statusText)
         
         if LicenseState.expiresAt then
             im.TableNextRow(ctx)
@@ -4099,9 +4473,18 @@ local function DrawLicenseUI(ctx, is_modal)
         
         im.TableNextRow(ctx)
         im.TableSetColumnIndex(ctx, 0)
-        im.Text(ctx, _0x5f6g() .. ' ' .. _0x7h8i() .. ':')
+        im.Text(ctx, 'Machine ID:')
         im.TableSetColumnIndex(ctx, 1)
         im.Text(ctx, LicenseState.deviceId or _0x1l2m())
+        
+        -- Display email if available (read-only, from API response)
+        if LicenseState.email and LicenseState.email ~= '' then
+            im.TableNextRow(ctx)
+            im.TableSetColumnIndex(ctx, 0)
+            im.Text(ctx, 'Email:')
+            im.TableSetColumnIndex(ctx, 1)
+            im.Text(ctx, LicenseState.email)
+        end
         
         im.EndTable(ctx)
     end
@@ -4142,7 +4525,12 @@ local function DrawLicenseUI(ctx, is_modal)
         
         local removeText = _0x7r8s() .. ' ' .. _0x2e3f() .. ' ' .. _0x8e9f()
         if im.Button(ctx, removeText, btnW, 0) then
+            -- Deactivate device before removing license key
+            if LicenseState.licenseKey and LicenseState.licenseKey ~= '' and LicenseState.deviceId and LicenseState.deviceId ~= '' then
+                DeactivateDevice(LicenseState.licenseKey, LicenseState.deviceId, LicenseState.email)
+            end
             LicenseState.licenseKey = nil
+            LicenseState.email = nil
             SetLicenseResult('inactive', nil, 'License key removed', nil)
             if _0x1a2b then _0x1a2b._0x5e6f = nil end
         end
@@ -4153,6 +4541,8 @@ local function DrawLicenseUI(ctx, is_modal)
         im.SetNextItemWidth(ctx, -1)
         local changed, new_key = im.InputText(ctx, '##license_key_input', tempKey, 256)
         if changed then
+            -- Remove spaces from license key
+            new_key = new_key:gsub(' ', '')
             if is_modal and _0x1a2b then _0x1a2b._0x5e6f = new_key end
             OPEN.temp_license_key = new_key
             tempKey = new_key
@@ -4510,14 +4900,21 @@ function DeleteFX(fx, Track)
   r.TrackFX_Delete(Track, fx)
 end
 
-function SetHelpHint(L1, L2, L3, L4, L5, L6)
+function SetHelpHint(L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12)
   if im.IsItemHovered(ctx) then
-    HelpHint[1] = L1
-    HelpHint[2] = L2
-    HelpHint[3] = L3
-    HelpHint[4] = L4
-    HelpHint[5] = L5
-    HelpHint[6] = L6
+    HelpHint = {}
+    if L1 then HelpHint[#HelpHint+1] = L1 end
+    if L2 then HelpHint[#HelpHint+1] = L2 end
+    if L3 then HelpHint[#HelpHint+1] = L3 end
+    if L4 then HelpHint[#HelpHint+1] = L4 end
+    if L5 then HelpHint[#HelpHint+1] = L5 end
+    if L6 then HelpHint[#HelpHint+1] = L6 end
+    if L7 then HelpHint[#HelpHint+1] = L7 end
+    if L8 then HelpHint[#HelpHint+1] = L8 end
+    if L9 then HelpHint[#HelpHint+1] = L9 end
+    if L10 then HelpHint[#HelpHint+1] = L10 end
+    if L11 then HelpHint[#HelpHint+1] = L11 end
+    if L12 then HelpHint[#HelpHint+1] = L12 end
   else
     HelpHint = {}
   end
@@ -5911,6 +6308,9 @@ end
 local function SettingsWindow()
   -- Detect close attempts
   local prevOpen = OPEN.Settings and true or false
+  -- Apply docking preview color to match resize grip
+  local resizeGripColor = Clr.ResizeGrip or 0x2D4F47FF
+  im.PushStyleColor(ctx, r.ImGui_Col_DockingPreview(), resizeGripColor)
   -- Store the window open state
   Settings_Visible, OPEN.Settings =  im.Begin(ctx, 'Settings', OPEN.Settings, im.WindowFlags_None)
   if Settings_Visible then
@@ -5974,6 +6374,18 @@ local function SettingsWindow()
         if rv4 then
           ShowFavoritesUnderSearchBar = v4 and true or false
           SaveGlobalBool('ShowFavoritesUnderSearchBar', ShowFavoritesUnderSearchBar)
+        end
+        
+        local rv5, v5 = im.Checkbox(ctx, 'Tint fx btns with parent container color', TintFXBtnsWithParentContainerColor and true or false)
+        if rv5 then
+          TintFXBtnsWithParentContainerColor = v5 and true or false
+          SaveGlobalBool('TintFXBtnsWithParentContainerColor', TintFXBtnsWithParentContainerColor)
+        end
+        
+        local rv6, v6 = im.Checkbox(ctx, 'Tint container button color', TintContainerButtonColor and true or false)
+        if rv6 then
+          TintContainerButtonColor = v6 and true or false
+          SaveGlobalBool('TintContainerButtonColor', TintContainerButtonColor)
         end
         
         -- Hidden parent button size
@@ -6599,6 +7011,8 @@ local function SettingsWindow()
 
     im.End(ctx)
   end
+  -- Pop docking preview color
+  im.PopStyleColor(ctx, 1)
   -- If settings window not visible, Style Editor cannot be open
   if not Settings_Visible then OPEN.style_editor_tab_open = nil end
   
@@ -6692,7 +7106,10 @@ function KeyboardShortcuts()
         OPEN.Snapshots = ((OPEN.Snapshots or 0) + 1) % 3
         SaveOpenState()
       end,
-      ToggleMonitorFX = function() OPEN.MonitorFX = toggle(OPEN.MonitorFX); SaveOpenState() end,
+      ToggleMonitorFX = function() 
+        OPEN.MonitorFX = toggle(OPEN.MonitorFX)
+        SaveOpenState() 
+      end,
       ExpandTrack     = function()
 
       end,
@@ -6798,6 +7215,29 @@ function loop()
   SuppressMultiSelMenuThisFrame = WetDryKnobDragging or false
   MultiSelMenuVisibleThisFrame = false
 
+  -- Apply default preset once before pushing any styles/colors so first frame matches
+  ApplyDefaultStylePresetIfAny()
+  local PopClrTimes = ApplyColors(ctx)
+  PushStyle() -- Apply style editor styles
+  -- Set resize grip (corner triangle) color after PushStyle so it takes precedence
+  -- Apply to all windows globally - must be before any windows are created
+  local resizeGripColor = Clr.ResizeGrip or 0x2D4F47FF
+  im.PushStyleColor(ctx, im.Col_ResizeGrip, resizeGripColor)
+  im.PushStyleColor(ctx, im.Col_ResizeGripHovered, Clr.ResizeGripHovered or 0x2D4F47FF)
+  im.PushStyleColor(ctx, im.Col_ResizeGripActive, Clr.ResizeGripActive or 0x2D4F47FF)
+  -- Set docking preview color to match resize grip color - must be pushed BEFORE window begins
+  im.PushStyleColor(ctx, r.ImGui_Col_DockingPreview(), resizeGripColor)
+  im.PushStyleColor(ctx, r.ImGui_Col_DockingEmptyBg(), resizeGripColor)
+
+  
+  PopClrTimes = PopClrTimes + 5 -- Update count for the 4 colors (3 resize grip + 1 docking preview)
+
+  -- Ensure we always unwind the base style stacks even when returning early
+  local function PopBaseStyleStacks()
+    PopStyle() -- pops style-editor pushes (vars + colors)
+    im.PopStyleColor(ctx, PopClrTimes) -- pops ApplyColors + resize/docking colors
+  end
+
   visible, open = im.Begin(ctx, 'My window', true,
     im.WindowFlags_NoScrollWithMouse + im.WindowFlags_NoScrollbar + im.WindowFlags_MenuBar)
 
@@ -6806,6 +7246,7 @@ function loop()
     _0x1f2a = _0x2a3b_Modal()
     -- If modal returns 'exit', user closed the window without authorization - exit script
     if _0x1f2a == 'exit' then
+      PopBaseStyleStacks()
       if visible then
         im.End(ctx)
       end
@@ -6818,6 +7259,7 @@ function loop()
   local _0x7f8a = IsLicenseValid()
   
   if _0x1f2a or not (_0x3b4c and _0x5d6e and _0x7f8a) then
+    PopBaseStyleStacks()
     if visible then
       im.End(ctx)
     end
@@ -6825,14 +7267,7 @@ function loop()
     return
   end
 
-  if HelpHint then
-    im.PushFont(ctx, Font_Andale_Mono_10)
-
-    for i, v in ipairs(HelpHint) do
-      im.Text(ctx, v)
-    end
-    im.PopFont(ctx)
-  end
+  -- HelpHint display moved to Hints window (removed from main window)
 
 
   ------ menu bar -------
@@ -6876,6 +7311,12 @@ function loop()
         HighlightItem(dimFill, nil, dimOutline)
       end
     end
+    
+    if im.MenuItem(ctx, 'Hints') then
+      OPEN.Hints = not (OPEN.Hints == true)
+      SaveOpenState()
+    end
+    if OPEN.Hints then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) end
     ---------------------------------------------------------------------
     ---
     -- Set colors for settings button (transparent base, FX button colors for hover/active)
@@ -6904,23 +7345,339 @@ function loop()
   -- Multi-selection top buttons removed; floating menu handled near first selected FX
 
   MonitorFX_Height = 0  -- IMPORTANT: reset height to 0 each frame
+  Hints_Height = 0  -- IMPORTANT: reset height to 0 each frame
+  Hints_Height_OnTop = 0  -- Only non-zero if hints window is docked on top
 
 
-  if OPEN.MonitorFX then 
-    if im.Begin(ctx, 'Monitor FXs   ',true, im.WindowFlags_NoScrollbar) then 
-        MonitorFX_Height = MonitorFXs(ctx, 0)
-      im.End(ctx)
+  -- Monitor FX window
+  local prevMonitorFX = OPEN.MonitorFX and true or false
+  local MonitorFX_Visible
+  
+  -- Ensure OPEN.MonitorFX is a proper boolean (not nil)
+  if OPEN.MonitorFX == nil then OPEN.MonitorFX = false end
+  
+  if OPEN.MonitorFX then
+    im.PushStyleVar(ctx, im.StyleVar_WindowRounding, 5)
+    MonitorFX_Visible, OPEN.MonitorFX = im.Begin(ctx, 'Monitor FX###MonitorFXWindow', OPEN.MonitorFX, im.WindowFlags_NoScrollbar)
+    im.PopStyleVar(ctx)
+    
+    -- Save state if close button was clicked
+    if prevMonitorFX ~= (OPEN.MonitorFX and true or false) then
+      SaveOpenState()
     end
+
+    if MonitorFX_Visible then 
+      MonitorFX_Height = MonitorFXs(ctx, 0)
+    end
+    -- ImGui requires End even when not visible
+    im.End(ctx)
+  else
+    MonitorFX_Visible = false
+    MonitorFX_Height = 0
+  end
+  
+  -- Hints window
+  local prevHints = OPEN.Hints and true or false
+  local Hints_Visible
+  
+  -- Ensure OPEN.Hints is a proper boolean (not nil)
+  if OPEN.Hints == nil then OPEN.Hints = false end
+  
+  if OPEN.Hints then
+    -- Hint Window Styling
+    im.PushStyleColor(ctx, im.Col_WindowBg, 0x222222EE) -- Dark semi-transparent background
+    im.PushStyleColor(ctx, im.Col_Border, 0x555555AA)   -- Subtle border
+    im.PushStyleVar(ctx, im.StyleVar_WindowRounding, 8) -- Rounded corners
+    im.PushStyleVar(ctx, im.StyleVar_WindowPadding, 12, 12) -- Comfortable padding
+
+    Hints_Visible, OPEN.Hints = im.Begin(ctx, 'Hints   ', OPEN.Hints, im.WindowFlags_NoScrollbar)
+    
+    -- Save state if close button was clicked
+    if prevHints ~= (OPEN.Hints and true or false) then
+      SaveOpenState()
+    end
+
+    if Hints_Visible then
+      im.PushFont(ctx, Font_Andale_Mono_10)
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0) -- Reduce vertical spacing
+      if HelpHint and #HelpHint > 0 then
+        -- Calculate available width and determine if we can use 2 columns
+        local availWidth = im.GetContentRegionAvail(ctx)
+        local minColumnWidth = 200 -- Minimum width per column
+        local columnSpacing = 20 -- Space between columns
+        local useTwoColumns = availWidth >= (minColumnWidth * 2 + columnSpacing) and #HelpHint > 4
+        
+        -- Store starting position
+        local startX, startY = im.GetCursorScreenPos(ctx)
+        local column1X = startX
+        local column2X = startX + (availWidth - columnSpacing) / 2 + columnSpacing
+        local column1Y = startY
+        local column2Y = startY
+        local lineHeight = im.GetTextLineHeight(ctx)
+        
+        -- Render hints
+        for i, v in ipairs(HelpHint) do
+          if v and v ~= "" then
+            -- Determine which column (odd = column 1, even = column 2)
+            local col = useTwoColumns and (((i - 1) % 2 == 0) and 1 or 2) or 1
+            local currentX = (col == 1) and column1X or column2X
+            local currentY = (col == 1) and column1Y or column2Y
+            
+            im.SetCursorScreenPos(ctx, currentX, currentY)
+            
+             -- Stylish bullet point
+             im.PushStyleColor(ctx, im.Col_Text, Clr.Buttons or 0x88CCFFFF) -- FX Btn color for bullet
+             im.Text(ctx, "•")
+             im.PopStyleColor(ctx)
+             im.SameLine(ctx)
+             
+             -- Check if string format is "Key = Action"
+             local key, desc = v:match("^(.-)%s*=%s*(.*)")
+             
+             if key then
+               -- Handle special cases: Drag Vertically/Horizontally -> LMB with arrows
+               -- Handle marquee selection -> RMB with 4-direction arrows
+               local arrowType = nil -- "vertical", "horizontal", "marquee"
+               local displayKey = key
+               local displayDesc = desc
+               
+               -- Check key for drag patterns (e.g. "LMB Drag Vertically" or "Ctrl+LMB Drag Vertically")
+               if key:find("Drag Vertically") then
+                 -- Extract modifier if present (e.g. "Ctrl+LMB Drag Vertically" -> "Ctrl+LMB")
+                 local modifierMatch = key:match("^([^%s]+)%s+Drag Vertically")
+                 if modifierMatch then
+                   displayKey = modifierMatch
+                 else
+                   displayKey = "LMB"
+                 end
+                 arrowType = "vertical"
+               elseif key:find("Drag Horizontally") then
+                 -- Extract modifier if present
+                 local modifierMatch = key:match("^([^%s]+)%s+Drag Horizontally")
+                 if modifierMatch then
+                   displayKey = modifierMatch
+                 else
+                   displayKey = "LMB"
+                 end
+                 arrowType = "horizontal"
+               elseif key:find("Marquee") or key:find("marquee") or desc:find("Marquee Selection") or desc:find("marquee") then
+                 displayKey = "RMB"
+                 arrowType = "marquee"
+               end
+             
+             -- Process each part of the key combination (e.g. "Alt+RMB")
+             local p_x, p_y = im.GetCursorScreenPos(ctx)
+             local pad_x, pad_y = 4, 0
+             local spacing = 2
+             
+             -- Split key by "+"
+             for part in string.gmatch(displayKey .. "+", "([^+]+)%+") do
+               -- Determine badge color for this part
+               local badgeColor = 0x555555FF -- Default Gray
+               local part_trimmed = part:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
+               
+               -- Convert display text: LMB -> L, RMB -> R
+               local displayText = part_trimmed
+               if part_trimmed == "LMB" then displayText = "L"
+               elseif part_trimmed == "RMB" then displayText = "R"
+               end
+               
+               if part_trimmed == "LMB" then badgeColor = 0x4CAF50FF -- Green
+               elseif part_trimmed == "RMB" then badgeColor = 0xFF9800FF -- Orange
+               elseif part_trimmed == "Alt" or part_trimmed == "Ctrl" or part_trimmed == "Shift" or part_trimmed == "Cmd" or part_trimmed == "Opt" then 
+                 badgeColor = 0xFF9800FF -- Orange for modifiers
+               elseif part_trimmed:find("Drag") then badgeColor = 0x00BCD4FF -- Cyan
+               end
+               
+               local txt_w, txt_h = im.CalcTextSize(ctx, displayText)
+               local icon_w = 0
+               if part_trimmed == "Alt" or part_trimmed == "Opt" or part_trimmed == "Shift" or part_trimmed == "Ctrl" then
+                 icon_w = 12
+               elseif (part_trimmed == "LMB" and arrowType) or (part_trimmed == "RMB" and arrowType == "marquee") then
+                 icon_w = 12 -- Space for arrow icon
+               end
+               
+               -- Draw rounded background for this part
+               if part_trimmed == "LMB" or part_trimmed == "RMB" then
+                   im.DrawList_AddRect(im.GetWindowDrawList(ctx), p_x, p_y, p_x + txt_w + pad_x*2 + icon_w, p_y + txt_h + pad_y*2, badgeColor, 4)
+                   im.PushStyleColor(ctx, im.Col_Text, badgeColor) -- Colored text for outline style
+               elseif part_trimmed == "Alt" or part_trimmed == "Ctrl" or part_trimmed == "Shift" or part_trimmed == "Cmd" or part_trimmed == "Opt" then
+                   im.DrawList_AddRect(im.GetWindowDrawList(ctx), p_x, p_y, p_x + txt_w + pad_x*2 + icon_w, p_y + txt_h + pad_y*2, 0xFFFFFFFF, 4)
+                   im.PushStyleColor(ctx, im.Col_Text, 0xFFFFFFFF) -- White text/icon for outline style
+               else
+                   im.DrawList_AddRectFilled(im.GetWindowDrawList(ctx), p_x, p_y, p_x + txt_w + pad_x*2 + icon_w, p_y + txt_h + pad_y*2, badgeColor, 4)
+                   im.PushStyleColor(ctx, im.Col_Text, 0xFFFFFFFF) -- White text/icon
+               end
+
+               -- Draw Icon if needed
+               local dl = im.GetWindowDrawList(ctx)
+               local icon_x = p_x + pad_x
+               local icon_cy = p_y + txt_h/2 + pad_y
+               
+               if part_trimmed == "Alt" or part_trimmed == "Opt" then
+                 -- Draw Option Key Symbol ⌥
+                 local s = 8 -- size
+                 local th = 1.5 -- thickness
+                 local l = icon_x
+                 local t = icon_cy - s/2 + 2
+                 local r = l + s
+                 local b = t + s - 4
+                 
+                 -- Top Left segment
+                 im.DrawList_AddLine(dl, l, t, l + s*0.3, t, 0xFFFFFFFF, th)
+                 -- Diagonal
+                 im.DrawList_AddLine(dl, l + s*0.3, t, r - s*0.3, b, 0xFFFFFFFF, th)
+                 -- Bottom Right segment
+                 im.DrawList_AddLine(dl, r - s*0.3, b, r, b, 0xFFFFFFFF, th)
+                 -- Top Right floating segment
+                 im.DrawList_AddLine(dl, r - s*0.3, t, r, t, 0xFFFFFFFF, th)
+                 
+               elseif part_trimmed == "Shift" then
+                 -- Draw Up Arrow
+                 local s = 8
+                 local cx = icon_x + s/2
+                 local cy = icon_cy + 1
+                 -- Arrow head
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx - s/2 + 1, cy, 0xFFFFFFFF, 1.5)
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx + s/2 - 1, cy, 0xFFFFFFFF, 1.5)
+                 -- Arrow body
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx, cy + s/2, 0xFFFFFFFF, 1.5)
+                 
+               elseif part_trimmed == "Ctrl" then
+                 -- Draw Caret ^
+                 local s = 8
+                 local cx = icon_x + s/2
+                 local cy = icon_cy -- Centered vertically
+                 im.DrawList_AddLine(dl, cx - s/2, cy + s/4, cx, cy - s/4, 0xFFFFFFFF, 1.5)
+                 im.DrawList_AddLine(dl, cx + s/2, cy + s/4, cx, cy - s/4, 0xFFFFFFFF, 1.5)
+                 
+               elseif part_trimmed == "LMB" and arrowType == "vertical" then
+                 -- Draw vertical double-sided arrow (↕)
+                 local s = 8
+                 local cx = icon_x + s/2
+                 local cy = icon_cy
+                 local th = 1.5
+                 -- Top arrow head
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx - s/3, cy - s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx + s/3, cy - s/3, badgeColor, th)
+                 -- Bottom arrow head
+                 im.DrawList_AddLine(dl, cx, cy + s/2, cx - s/3, cy + s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy + s/2, cx + s/3, cy + s/3, badgeColor, th)
+                 -- Center line
+                 im.DrawList_AddLine(dl, cx, cy - s/3, cx, cy + s/3, badgeColor, th)
+                 
+               elseif part_trimmed == "LMB" and arrowType == "horizontal" then
+                 -- Draw horizontal double-sided arrow (↔)
+                 local s = 8
+                 local cx = icon_x + s/2
+                 local cy = icon_cy
+                 local th = 1.5
+                 -- Left arrow head
+                 im.DrawList_AddLine(dl, cx - s/2, cy, cx - s/3, cy - s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx - s/2, cy, cx - s/3, cy + s/3, badgeColor, th)
+                 -- Right arrow head
+                 im.DrawList_AddLine(dl, cx + s/2, cy, cx + s/3, cy - s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx + s/2, cy, cx + s/3, cy + s/3, badgeColor, th)
+                 -- Center line
+                 im.DrawList_AddLine(dl, cx - s/3, cy, cx + s/3, cy, badgeColor, th)
+                 
+               elseif part_trimmed == "RMB" and arrowType == "marquee" then
+                 -- Draw 4-direction double-sided arrows (↕↔)
+                 local s = 8
+                 local cx = icon_x + s/2
+                 local cy = icon_cy
+                 local th = 1.5
+                 -- Vertical arrows (up/down)
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx - s/4, cy - s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy - s/2, cx + s/4, cy - s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy + s/2, cx - s/4, cy + s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy + s/2, cx + s/4, cy + s/3, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx, cy - s/3, cx, cy + s/3, badgeColor, th)
+                 -- Horizontal arrows (left/right)
+                 im.DrawList_AddLine(dl, cx - s/2, cy, cx - s/3, cy - s/4, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx - s/2, cy, cx - s/3, cy + s/4, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx + s/2, cy, cx + s/3, cy - s/4, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx + s/2, cy, cx + s/3, cy + s/4, badgeColor, th)
+                 im.DrawList_AddLine(dl, cx - s/3, cy, cx + s/3, cy, badgeColor, th)
+               end
+
+               -- Draw text inside badge
+               im.SetCursorScreenPos(ctx, p_x + pad_x + icon_w, p_y + pad_y)
+               im.Text(ctx, displayText)
+               im.PopStyleColor(ctx)
+               
+               -- Advance X position for next part
+               p_x = p_x + txt_w + pad_x*2 + spacing + icon_w
+             end
+             
+             -- Advance cursor for description (move past all badges)
+             im.SetCursorScreenPos(ctx, p_x + 4, p_y) -- Add a bit more spacing before description
+             im.Text(ctx, displayDesc)
+           else
+             -- Fallback for simple text
+             im.Text(ctx, v)
+           end
+           
+           -- Update Y position for the column after rendering this hint
+           -- Get final cursor position after all rendering
+           local _, finalY = im.GetCursorScreenPos(ctx)
+           -- Use the final Y position, ensuring we advance at least by line height
+           local newY = math.max(currentY + lineHeight, finalY + 1)
+           
+           if col == 1 then
+             column1Y = newY
+           else
+             column2Y = newY
+           end
+        end
+      end
+    else
+      im.PushStyleColor(ctx, im.Col_Text, 0xAAAAAAFF) -- Dimmed text for empty state
+      im.Text(ctx, 'Hover over elements to see hints')
+      im.PopStyleColor(ctx)
+    end
+    im.PopStyleVar(ctx) -- Pop ItemSpacing
+    im.PopFont(ctx)
+    -- Track height when docked, and check if it's on top
+    if im.IsWindowDocked(ctx) then
+      local w
+      w, Hints_Height = im.GetWindowSize(ctx)
+      -- Store hints window Y position for comparison
+      local hintsWinY = select(2, im.GetWindowPos(ctx))
+      -- We'll compare with main window Y position after it's captured
+      -- Store hints Y position temporarily (we'll use a global to compare later)
+      Hints_Win_Y = hintsWinY
+    else
+      Hints_Win_Y = nil
+    end
+    else
+      Hints_Win_Y = nil
+    end
+
+    -- ImGui requires End even when not visible
+    im.End(ctx)
+
+    im.PopStyleColor(ctx, 2)
+    im.PopStyleVar(ctx, 2)
+  else
+    Hints_Visible = false
+    Hints_Height = 0
+    Hints_Win_Y = nil
   end
 
-  -- Apply default preset once before pushing any styles/colors so first frame matches
-  ApplyDefaultStylePresetIfAny()
-  local PopClrTimes = ApplyColors(ctx)
-  PushStyle() -- Apply style editor styles
   im.PushFont(ctx, Font_Andale_Mono_12)
   -- Capture root window screen-space bounds for later outline drawing
   RootWinL, RootWinT = im.GetWindowPos(ctx)
   RootWinW, RootWinH = im.GetWindowSize(ctx)
+  
+  -- Check if hints window is docked on top (compare Y positions)
+  Hints_Height_OnTop = 0
+  if Hints_Height and Hints_Height > 0 and Hints_Win_Y and RootWinT then
+    -- If hints window Y is less than main window Y, it's docked on top
+    if Hints_Win_Y < RootWinT then
+      Hints_Height_OnTop = Hints_Height
+    end
+  end
 
 
   VP.vp = im.GetWindowViewport(ctx)
@@ -7206,6 +7963,21 @@ function loop()
       MarqueeSelection.startingOnVolDrag = false
     end
 
+    -- Preserve marquee interaction when clicking inside last-frame selected send rects (e.g., pan knob)
+    do
+      if SelectedSendRectsFrame and #SelectedSendRectsFrame > 0 then
+        local mx, my = im.GetMousePos(ctx)
+        if im.IsMouseClicked(ctx, 0) and mx and my then
+          for _, rct in ipairs(SelectedSendRectsFrame) do
+            if mx >= rct.L and mx <= rct.R and my >= rct.T and my <= rct.B then
+              InteractingWithSelectedSends = true
+              break
+            end
+          end
+        end
+      end
+    end
+
     -- Clear selection on left click (only if not interacting with selected FXs/Sends or clicking the multi-select menu)
     do
       local hoveringMenu = false
@@ -7221,6 +7993,8 @@ function loop()
     -- Reset the interaction flags
     InteractingWithSelectedFX = false
     InteractingWithSelectedSends = false
+    -- Clear selected send rect cache; will be repopulated during send rendering for next frame
+    SelectedSendRectsFrame = {}
 
     rv, Payload_Type, Payload, is_preview, is_delivery = im.GetDragDropPayload(ctx)
     PanFaderActivation(ctx)
@@ -7259,7 +8033,7 @@ function loop()
           SettingsWindow()
         end
 
-        im.SetCursorPosY(ctx, Top_Arrang + Trk[t].PosY - (MonitorFX_Height or 0))
+        im.SetCursorPosY(ctx, Top_Arrang + Trk[t].PosY - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0))
         local masterVisibility = r.GetMasterTrackVisibility()
         if masterVisibility == 2 or masterVisibility == 0 then hide = 0 else hide = 1 end
       else
@@ -8710,7 +9484,6 @@ end
 -- See REAPER API notes: idx = 0x2000000 + subItem * (FX_Count+1) + (containerIndex+1)
 function Calc_Container_FX_Index(track, containerIndex, insertPosInside)
   if not track or not containerIndex then 
-    r.ShowConsoleMsg("Calc_Container_FX_Index: ERROR - missing track or containerIndex\n")
     return nil 
   end
   
@@ -8744,8 +9517,6 @@ function Calc_Container_FX_Index(track, containerIndex, insertPosInside)
     idx = 0x2000000 + insertPosInside * strideTop + (containerIndex + 1)
   end
 
-  r.ShowConsoleMsg(string.format("Calc_Container_FX_Index: containerIndex=%d, insertPosInside=%d, fxTotal=%d, curCnt=%d, idx=0x%X (%d)\n",
-    containerIndex, insertPosInside, fxTotal, curCnt, idx, idx))
   return idx
 end
 

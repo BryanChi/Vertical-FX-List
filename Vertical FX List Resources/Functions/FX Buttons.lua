@@ -38,6 +38,19 @@ if not deriveActive then
   end
 end
 
+-- Blend two colors together (tint base color with tint color)
+-- ratio: 0.0 = all base, 1.0 = all tint (default 0.3 = 30% tint, 70% base)
+local function BlendColors(baseColor, tintColor, ratio)
+  ratio = ratio or 0.3
+  local r1, g1, b1, a1 = im.ColorConvertU32ToDouble4(baseColor)
+  local r2, g2, b2, a2 = im.ColorConvertU32ToDouble4(tintColor)
+  local r = r1 * (1 - ratio) + r2 * ratio
+  local g = g1 * (1 - ratio) + g2 * ratio
+  local b = b1 * (1 - ratio) + b2 * ratio
+  local a = a1 -- preserve base alpha
+  return im.ColorConvertDouble4ToU32(r, g, b, a)
+end
+
 -- Helpers for container path math (adapted from FX Devices General Functions)
 local function GetContainerPathFromFxId(track, fxidx)
   if type(fxidx) == 'string' then return nil end
@@ -104,6 +117,37 @@ local function TrackFX_GetInsertPositionInContainer(track, container_id, target_
     target_id = GetFXIDinContainer(track, nil, container_id + 1, target_pos)
   end
   return target_id
+end
+
+-- Find FX by GUID including those inside containers
+-- Returns the container path index (>= 0x2000000) if found inside a container, or regular index (0-based) if found at top level
+-- Returns nil if not found
+local function FindFXIndexByGUIDIncludingContainers(track, guid)
+  if not track or not guid then return nil end
+  
+  -- First check top-level FX
+  local cnt = r.TrackFX_GetCount(track)
+  for i = 0, cnt - 1 do
+    if r.TrackFX_GetFXGUID(track, i) == guid then
+      return i
+    end
+    -- Check if this is a container and search inside it
+    local _, cntStr = r.TrackFX_GetNamedConfigParm(track, i, 'container_count')
+    if cntStr then
+      local curCnt = tonumber(cntStr) or 0
+      for j = 0, curCnt - 1 do
+        local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(track, i, 'container_item.' .. j)))
+        if childIdx and childIdx >= 0x2000000 then
+          -- This is a container path index, check GUID directly using the path index
+          local fxGuid = r.TrackFX_GetFXGUID(track, childIdx)
+          if fxGuid == guid then
+            return childIdx
+          end
+        end
+      end
+    end
+  end
+  return nil
 end
 
 -- Compute an insertion index to drop BEFORE a container (works for nested containers)
@@ -487,8 +531,6 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
 
           if dropped and draggedFXIdxNum then
             local Mods = im.GetKeyMods(ctx)
-            r.ShowConsoleMsg(string.format("DROP ON CONTAINER ICON: container fx=%d (0x%X), draggedFX=%d, DraggingTrack=%s, Track=%s, Mods=%d\n", 
-              fx, fx, draggedFXIdxNum, tostring(DraggingTrack_Data), tostring(Track), Mods))
             
             -- IMPORTANT:
             -- At top level, `fx` is a plain FX index.
@@ -510,13 +552,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             local dragIdx = DraggingFX_Index or draggedFXIdxNum
             if DraggingTrack_Data == Track and dragIdx and dragIdx < fx then
               insertPos = 1
-              r.ShowConsoleMsg(string.format("  Dragging upward on same track (dragIdx=%s, fx=%s): force drop into first slot\n", tostring(dragIdx), tostring(fx)))
             end
-            r.ShowConsoleMsg(string.format("  Target container=%d (0x%X) has %d children, dropping at position %d\n", containerRef, containerRef, curCnt, insertPos))
             into = TrackFX_GetInsertPositionInContainer and TrackFX_GetInsertPositionInContainer(Track, containerRef, insertPos)
             if into then
-              r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack: fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d), move=%s\n",
-                tostring(DraggingTrack_Data), draggedFXIdxNum, tostring(Track), into, into, tostring(Mods == 0)))
               if Mods == 0 then
                 r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFXIdxNum, Track, into, true)
               elseif Mods == Super then
@@ -656,6 +694,45 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         im.PushStyleColor(ctx, im.Col_ButtonActive,  deriveActive(baseColor))
         pushCount = pushCount + 2
         hoverColor = deriveHover(baseColor)
+      end
+      
+      -- Apply parent container color tinting if enabled
+      if TintFXBtnsWithParentContainerColor and container then
+        local containerGUID = r.TrackFX_GetFXGUID(Track, container)
+        if containerGUID then
+          local containerColor = GetContainerColor(Track, container, containerGUID)
+          if containerColor and containerColor ~= 0xffffffff then
+            baseColor = BlendColors(baseColor, containerColor, 0.3)
+            -- Update the pushed colors with tinted versions
+            im.PopStyleColor(ctx, 2) -- Pop the two colors we pushed earlier
+            pushCount = pushCount - 2
+            im.PushStyleColor(ctx, im.Col_Button, baseColor)
+            im.PushStyleColor(ctx, im.Col_ButtonActive, deriveActive(baseColor))
+            pushCount = pushCount + 2
+            -- Derive hover color from tinted base color
+            hoverColor = deriveHover(baseColor)
+          end
+        end
+      end
+      
+      -- Apply container button color tinting if enabled (tint the container FX button itself)
+      if TintContainerButtonColor then
+        local _, __cnt = r.TrackFX_GetNamedConfigParm(Track, fx, 'container_count')
+        local isContainer = (__cnt and __cnt ~= '') and true or false
+        if isContainer and fxID then
+          local containerColor = GetContainerColor(Track, fx, fxID)
+          if containerColor and containerColor ~= 0xffffffff then
+            baseColor = BlendColors(baseColor, containerColor, 0.3)
+            -- Update the pushed colors with tinted versions
+            im.PopStyleColor(ctx, 2) -- Pop the two colors we pushed earlier
+            pushCount = pushCount - 2
+            im.PushStyleColor(ctx, im.Col_Button, baseColor)
+            im.PushStyleColor(ctx, im.Col_ButtonActive, deriveActive(baseColor))
+            pushCount = pushCount + 2
+            -- Derive hover color from tinted base color
+            hoverColor = deriveHover(baseColor)
+          end
+        end
       end
       
       -- Get track GUID and check if FX is selected via marquee selection
@@ -1358,9 +1435,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         end
         -- Show hint text for main FX button
         if isContainer then
-          SetHelpHint('LMB = Open FX Window', 'RMB = Toggle Container Expand/Collapse', 'Alt+RMB = Rename FX', 'Drag Vertically = Reorder FX', 'Drag Horizontally = Adjust Wet/Dry', 'Alt+LMB = Delete FX')
+          SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Toggle Container Expand/Collapse', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
         else
-          SetHelpHint('LMB = Open FX Window', 'Alt+RMB = Rename FX', 'Drag Vertically = Reorder FX', 'Drag Horizontally = Adjust Wet/Dry', 'Alt+LMB = Delete FX')
+          SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
         end
       end
       -- Toggle container collapse/expand with right-click (ignore key modifiers, except Alt)
@@ -1724,7 +1801,6 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         local dragUpOnSameTrack = (DraggingTrack_Data == Track) and (dragIdxKnown ~= nil) and (dragIdxKnown < fx)
         if dragUpOnSameTrack then
           ContainerHalfTarget = 'into'
-          r.ShowConsoleMsg(string.format("  Half-drop forced INTO (dragging upward): dragIdx=%s fx=%s\n", tostring(dragIdxKnown), tostring(fx)))
         else
           local Lh, Th = im.GetItemRectMin(ctx)
           local Rh, Bh = im.GetItemRectMax(ctx)
@@ -1953,15 +2029,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             -- Command+Drag: copy all selected FXs (use snapshot if available, otherwise look up current indices)
             for _, g in ipairs(selGuids) do
               local origIdx = snap and snap[g] or nil
-              -- If not in snapshot, look up current index from source track
+              -- If not in snapshot, look up current index from source track (including containers)
               if origIdx == nil then
-                local cnt = r.TrackFX_GetCount(DraggingTrack_Data)
-                for j = 0, cnt - 1 do
-                  if r.TrackFX_GetFXGUID(DraggingTrack_Data, j) == g then
-                    origIdx = j
-                    break
-                  end
-                end
+                origIdx = FindFXIndexByGUIDIncludingContainers(DraggingTrack_Data, g)
               end
               if origIdx ~= nil then
                 pairsList[#pairsList+1] = { guid=g, orig=origIdx }
@@ -2006,23 +2076,35 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
 
             -- Step 1: Compact selected to a contiguous block around the lowest original index
             -- Skip compaction when copying (Command held) - copy directly from original positions
+            -- Also skip compaction if FXs are inside containers (container path indices >= 0x2000000)
+            -- because container path indices can't be compacted using simple arithmetic
             if not cmdHeld then
               local lowest = asc[1] and asc[1].orig or nil
-              if lowest then
-                -- Move each selected by original order to eliminate gaps
+              if lowest and lowest < 0x2000000 then
+                -- Only compact if all FXs are at top level (not in containers)
+                local allTopLevel = true
                 for i=1,#asc do
-                  local want = lowest + (i-1)
-                  if asc[i].orig ~= want then
-                    table.insert(MovFX.FromPos, asc[i].orig)
-                    table.insert(MovFX.ToPos, want)
-                    table.insert(MovFX.FromTrack, DraggingTrack_Data)
-                    table.insert(MovFX.ToTrack, DraggingTrack_Data)
-                    table.insert(MovFX.GUID, asc[i].guid)
-                    asc[i].orig = want
+                  if asc[i].orig and asc[i].orig >= 0x2000000 then
+                    allTopLevel = false
+                    break
                   end
                 end
-                -- Update draggedOrig after compaction
-                draggedOrig = lowest + draggedRank
+                if allTopLevel then
+                  -- Move each selected by original order to eliminate gaps
+                  for i=1,#asc do
+                    local want = lowest + (i-1)
+                    if asc[i].orig ~= want then
+                      table.insert(MovFX.FromPos, asc[i].orig)
+                      table.insert(MovFX.ToPos, want)
+                      table.insert(MovFX.FromTrack, DraggingTrack_Data)
+                      table.insert(MovFX.ToTrack, DraggingTrack_Data)
+                      table.insert(MovFX.GUID, asc[i].guid)
+                      asc[i].orig = want
+                    end
+                  end
+                  -- Update draggedOrig after compaction
+                  draggedOrig = lowest + draggedRank
+                end
               end
             end
 
@@ -2053,20 +2135,43 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                   local isSameContainerMove = false
                   if sameTrack and not cmdHeld then
                     -- Moving on same track: check if dragged FX is also in the same container
+                    -- draggedOrig might be a container path index (>= 0x2000000) or regular index
                     local draggedSlotPos = nil
+                    -- Get the GUID of the dragged FX to compare
+                    local draggedGuid = draggedOrig and r.TrackFX_GetFXGUID(Track, draggedOrig) or nil
                     for i = 0, curCnt - 1 do
                       local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+                      -- Compare by index first (fast path), then by GUID if indices don't match
                       if childIdx == draggedOrig then
                         draggedSlotPos = i
                         isSameContainerMove = true
                         break
+                      elseif draggedGuid then
+                        -- If indices don't match, compare by GUID (handles case where draggedOrig is regular index but childIdx is container path index)
+                        local childGuid = r.TrackFX_GetFXGUID(Track, childIdx)
+                        if childGuid == draggedGuid then
+                          draggedSlotPos = i
+                          isSameContainerMove = true
+                          break
+                        end
                       end
                     end
-                    if isSameContainerMove and slotPos >= draggedSlotPos then
-                      -- Moving down within same container: adjust for block length
-                      insertionStart = slotPos - (blockLen - 1)
+                    if isSameContainerMove then
+                      if slotPos >= draggedSlotPos then
+                        -- Moving down within same container: the source FX will be removed first
+                        -- If dragging from slot A to slot B (where B > A), after removal:
+                        --   - Slots 0..A-1 stay the same
+                        --   - Slot A is removed
+                        --   - Slots A+1..B-1 shift down to A..B-2
+                        --   - We want to insert at position B (after slot B-1, which was originally slot B)
+                        -- So insertionStart should be slotPos (the target slot position)
+                        insertionStart = slotPos
+                      else
+                        -- Moving up within same container: insert at target position (before slotPos)
+                        insertionStart = slotPos
+                      end
                     else
-                      -- Moving up or not same container: insert at target position
+                      -- Not same container: insert at target position (before slotPos)
                       insertionStart = slotPos
                     end
                   else
@@ -2083,14 +2188,39 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                       -- When copying, use original index (no compaction)
                       fromIndex = it.orig
                     else
-                      -- When moving, use contiguous index after compaction
-                      fromIndex = blockStart + rank
+                      -- When moving, use original index if it's a container path index, otherwise use compacted index
+                      if it.orig and it.orig >= 0x2000000 then
+                        -- Container path index: use original (compaction was skipped)
+                        fromIndex = it.orig
+                      else
+                        -- Regular index: use compacted index
+                        fromIndex = blockStart + rank
+                      end
                     end
                     local targetSlot = insertionStart + rank
                     -- Convert slot position (0-based) to container insertion index (1-based for Calc_Container_FX_Index)
-                    -- When moving within the same container, use slotPos + 1 because slot positions are already adjusted
-                    -- When copying or moving from outside, use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
-                    local insertPosInside = isSameContainerMove and (targetSlot + 1) or (targetSlot + 2)
+                    -- Calc_Container_FX_Index inserts BEFORE the specified position (1-based)
+                    -- When moving within the same container:
+                    --   - Moving up: insertionStart = slotPos, targetSlot = slotPos + rank
+                    --     We want to insert before slotPos, so insertPosInside = slotPos + 1 = targetSlot + 1 (for rank=0)
+                    --   - Moving down: insertionStart = slotPos, targetSlot = slotPos + rank  
+                    --     We want to insert AFTER slotPos (since source will be removed first)
+                    --     To insert after slot N (0-based), we need insertPosInside = N + 2 (1-based)
+                    --     So insertPosInside = slotPos + 2 = targetSlot + 2 (for rank=0)
+                    -- When copying or moving from outside: use targetSlot + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
+                    local insertPosInside
+                    if isSameContainerMove then
+                      if slotPos >= draggedSlotPos then
+                        -- Moving down: insert after target slot
+                        insertPosInside = targetSlot + 2
+                      else
+                        -- Moving up: insert before target slot
+                        insertPosInside = targetSlot + 1
+                      end
+                    else
+                      -- Copying or moving from outside
+                      insertPosInside = targetSlot + 2
+                    end
                     local target = Calc_Container_FX_Index and Calc_Container_FX_Index(Track, container, insertPosInside) or targetSlot
                     table.insert(MovFX.FromPos, fromIndex)
                     table.insert(MovFX.ToPos, target)
@@ -2228,8 +2358,6 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         end
 
         if not didBatch then
-          r.ShowConsoleMsg(string.format("DROP ON CONTAINER SLOT: fx=%d (0x%X), draggedFX=%d, container=%s, DraggingTrack=%s, Track=%s\n",
-            fx, fx, draggedFX, tostring(container), tostring(DraggingTrack_Data), tostring(Track)))
           -- If dropping into a container, calculate the container insertion index
           local targetIndex = fx
           local sameTrackSingle = (DraggingTrack_Data == Track)
@@ -2243,15 +2371,12 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           local finalContainerHalf = ContainerHalfTarget
           if DraggingTrack_Data == Track and dragIdxKnown and dragIdxKnown < fx then
             finalContainerHalf = 'into'
-            r.ShowConsoleMsg(string.format("  Final half target forced INTO (dragging upward): dragIdx=%s fx=%s\n", tostring(dragIdxKnown), tostring(fx)))
           end
 
           if finalContainerHalf == 'into' then
             containerTargetOverride = fx
             insertPosOverride = 1
-            r.ShowConsoleMsg(string.format("  Half-drop INTO container %d (0x%X) at position 1\n", fx, fx))
           elseif finalContainerHalf == 'before' then
-            r.ShowConsoleMsg("  Half-drop BEFORE container (outside)")
             container = nil -- treat as normal before-hover insertion
             targetIndex = ComputeInsertBeforeContainer(Track, fx) or fx
             beforeOverride = true
@@ -2259,7 +2384,6 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
 
           if containerTargetOverride then
             targetIndex = TrackFX_GetInsertPositionInContainer and TrackFX_GetInsertPositionInContainer(Track, containerTargetOverride, insertPosOverride or 1)
-            r.ShowConsoleMsg(string.format("  Calculated targetIndex (half-drop into) = 0x%X (%d)\n", targetIndex or 0, targetIndex or 0))
           elseif container then
             -- IMPORTANT:
             -- Inside containers, `fx` and container_item.N are *container-path indices* (>= 0x2000000).
@@ -2270,49 +2394,61 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             local slotPos = nil
             local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')
             local curCnt = tonumber(cntStr) or 0
-            r.ShowConsoleMsg(string.format("  Container %d has %d children\n", container, curCnt))
             for i = 0, curCnt - 1 do
               local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
-              r.ShowConsoleMsg(string.format("    container_item.%d = %d\n", i, childIdx or -1))
               if childIdx == actualFxIndex then
                 slotPos = i
-                r.ShowConsoleMsg(string.format("  Found slotPos=%d for actualFxIndex=%d (original fx=%d)\n", slotPos, actualFxIndex, fx))
                 break
               end
             end
             
             if slotPos ~= nil and TrackFX_GetInsertPositionInContainer then
-              r.ShowConsoleMsg(string.format("  Found slotPos=%d for fx=%d\n", slotPos, fx))
               -- Check if dragged FX is also in the same container (same-container move)
               local isSameContainerMove = false
-              if sameTrackSingle then
+              local draggedSlotPos = nil
+              if sameTrackSingle and draggedFX then
+                -- Get the GUID of the dragged FX to compare
+                local draggedGuid = r.TrackFX_GetFXGUID(Track, draggedFX)
                 for i = 0, curCnt - 1 do
                   local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
+                  -- Compare by index first (fast path), then by GUID if indices don't match
                   if childIdx == draggedFX then
                     isSameContainerMove = true
-                    r.ShowConsoleMsg(string.format("  Same-container move detected (draggedFX=%d is also in container)\n", draggedFX))
+                    draggedSlotPos = i
                     break
+                  elseif draggedGuid then
+                    -- If indices don't match, compare by GUID (handles case where draggedFX is regular index but childIdx is container path index)
+                    local childGuid = r.TrackFX_GetFXGUID(Track, childIdx)
+                    if childGuid == draggedGuid then
+                      isSameContainerMove = true
+                      draggedSlotPos = i
+                      break
+                    end
                   end
                 end
               end
               
               -- Convert slot position (0-based) to container insertion index (1-based for Calc_Container_FX_Index)
-              -- When moving within the same container, use slotPos + 1 because slot positions are already correct
-              -- When copying or moving from outside, use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
-              local insertPosInside = isSameContainerMove and (slotPos + 1) or (slotPos + 2)
-              r.ShowConsoleMsg(string.format("  Calculating insertPosInside=%d (slotPos=%d, isSameContainerMove=%s)\n", 
-                insertPosInside, slotPos, tostring(isSameContainerMove)))
+              -- Calc_Container_FX_Index inserts BEFORE the specified position (1-based)
+              local insertPosInside
+              if isSameContainerMove then
+                if slotPos >= draggedSlotPos then
+                  -- Moving down: insert after target slot (since source will be removed first)
+                  insertPosInside = slotPos + 2
+                else
+                  -- Moving up: insert before target slot
+                  insertPosInside = slotPos + 1
+                end
+              else
+                -- Copying or moving from outside: use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
+                insertPosInside = slotPos + 2
+              end
               targetIndex = TrackFX_GetInsertPositionInContainer(Track, container, insertPosInside)
-              r.ShowConsoleMsg(string.format("  Calculated targetIndex=0x%X (%d)\n", targetIndex or 0, targetIndex or 0))
-            else
-              r.ShowConsoleMsg(string.format("  ERROR: slotPos=%s, TrackFX_GetInsertPositionInContainer=%s\n", tostring(slotPos), tostring(TrackFX_GetInsertPositionInContainer)))
             end
           end
           
           if Mods == 0 then
             if beforeOverride then
-              r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack (MOVE before): fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d)\n",
-                tostring(DraggingTrack_Data), draggedFX, tostring(Track), targetIndex, targetIndex))
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, true)
             elseif container and targetIndex and targetIndex >= 0x2000000 then
               r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack (MOVE): fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d)\n",
@@ -2577,6 +2713,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           -- Set position with Cond_Always to ensure it's positioned correctly each frame
           im.SetNextWindowPos(ctx, menuX, menuY, im.Cond_Always)
           im.SetNextWindowBgAlpha(ctx, 0.95)
+          -- Apply docking preview color to match resize grip
+          local resizeGripColor = Clr and Clr.ResizeGrip or 0x2D4F47FF
+          im.PushStyleColor(ctx, r.ImGui_Col_DockingPreview(), resizeGripColor)
           -- Ensure window can receive input and is brought to front when appearing
           local flags = im.WindowFlags_NoTitleBar | im.WindowFlags_NoResize | im.WindowFlags_NoMove | im.WindowFlags_AlwaysAutoResize | im.WindowFlags_NoSavedSettings | im.WindowFlags_NoScrollbar
           local visible, open = im.Begin(ctx, winName, true, flags)
@@ -2647,6 +2786,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
               local W, H = im.GetWindowSize(ctx)
               MultiSelMenuRect = { L = L, T = T, R = L + W, B = T + H }
             end
+            im.PopStyleColor(ctx, 1) -- Pop docking preview color
             im.End(ctx)
           end
         end

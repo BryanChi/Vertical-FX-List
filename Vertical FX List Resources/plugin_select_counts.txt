@@ -1,8 +1,8 @@
-VST3: Pro-Q 4 (FabFilter)	51
+VST3: Pro-Q 4 (FabFilter)	53
 VST3: Pro-C 2 (FabFilter)	34
-Container	21
+Container	28
+VST3: Pro-R 2 (FabFilter)	11
 JS: De-esser [Liteon/deesser]	10
-VST3: Pro-R 2 (FabFilter)	10
 VST3: Pro-L 2 (FabFilter)	8
 VST3: Timeless 3 (FabFilter)	6
 VST3: Fabfilter Pro R	5
@@ -10,12 +10,16 @@ VST3i: Current (Minimal)	5
 VST3: FabFilter Pro-Q 2 (FabFilter)	4
 VST3: bloom (oeksound)	4
 VST: ValhallaDelay (Valhalla DSP, LLC)	4
+VST3: MDynamicsMBLarge (MeldaProduction)	3
 VST3: kHs Gain (Kilohearts)	3
+VST: FabFilter Volcano 3 (FabFilter)	3
 AUi: MSoundFactory6out (MeldaProduction)	2
 VST3: Abbey Road Reel ADT Live Mono (Waves)	2
+VST3: Fresh Air (Slate Digital)	2
 VST3: MDynamicsMB (MeldaProduction)	2
 VST3: ValhallaFreqEcho (Valhalla DSP, LLC)	2
 VST3: ValhallaSupermassive (Valhalla DSP, LLC)	2
+VST3: ValhallaVintageVerb (Valhalla DSP, LLC)	2
 VST3: kHs Phaser (Kilohearts)	2
 VST3: kHs Reverb (Kilohearts)	2
 VST3i: Omnisphere (Spectrasonics) (18 out)	2
@@ -24,11 +28,12 @@ AU: ValhallaSpaceModulator (Valhalla DSP, LLC)	1
 AUi: Vital (Vital Audio)	1
 VST3: Abbey Road Reel ADT Mono/Stereo (Waves)	1
 VST3: Carve EQ (Kilohearts)	1
-VST3: Fresh Air (Slate Digital)	1
+VST3: Cymatics Deja Vu (Cymatics)	1
+VST3: Hybrid Filter (Minimal)	1
 VST3: MDynamics (MeldaProduction)	1
-VST3: MDynamicsMBLarge (MeldaProduction)	1
 VST3: MRingModulator (MeldaProduction)	1
 VST3: MVibrato (MeldaProduction)	1
+VST3: Ozone 12 (iZotope)	1
 VST3: Pro-G (FabFilter)	1
 VST3: Rift (Minimal)	1
 VST3: Timeless 2 (FabFilter)	1
@@ -36,7 +41,6 @@ VST3: Transit 2 (BABY Audio)	1
 VST3: VELA (Sonic Academy)	1
 VST3: ValhallaDelay (Valhalla DSP, LLC)	1
 VST3: ValhallaSpaceModulator (Valhalla DSP, LLC)	1
-VST3: ValhallaVintageVerb (Valhalla DSP, LLC)	1
 VST3: Volcano 3 (FabFilter)	1
 VST3: kHs Compressor (Kilohearts)	1
 VST3: kHs Haas (Kilohearts)	1
@@ -44,8 +48,9 @@ VST3i: ADSR Sample Manager (ADSR)	1
 VST3i: Kontakt 8 (Native Instruments) (64 out)	1
 VST3i: MDrummer (MeldaProduction) (32 out)	1
 VST3i: Speedrum2 (Apisonic) (32 out)	1
+VST3i: XO (XLN Audio) (18 out)	1
 VST: FabFilter Pro-C 2 (FabFilter)	1
-VST: FabFilter Volcano 3 (FabFilter)	1
 VST: MDynamics (MeldaProduction)	1
 VST: MDynamicsMB (MeldaProduction)	1
 VST: MReverb (MeldaProduction)	1
+VSTi: Cypher2 (FXpansion)	1
