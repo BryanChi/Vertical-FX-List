@@ -8,11 +8,11 @@
 local reaper_api = reaper
 local system_os = reaper_api.GetOS()
 local path_sep = package.config:sub(1, 1)
-local current_script_dir = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]]
+local current_script_dir = debug.getinfo(1, "S").source:match [[^@?(.*[\\/])[^\\/]-$]]
 
-local PLUGIN_DATA_FILE = current_script_dir .. "/FX_LIST.txt"
-local CATEGORY_DATA_FILE = current_script_dir .. "/FX_CAT_FILE.txt"
-local DEV_DATA_FILE = current_script_dir .. "/FX_DEV_LIST_FILE.txt"
+local PLUGIN_DATA_FILE = current_script_dir .. "FX_LIST.txt"
+local CATEGORY_DATA_FILE = current_script_dir .. "FX_CAT_FILE.txt"
+local DEV_DATA_FILE = current_script_dir .. "FX_DEV_LIST_FILE.txt"
 
 local CATEGORIES = {}
 local DEV_NAMES = { " (Waves)" }
@@ -280,7 +280,7 @@ local function PluginExistsInList(plugin_list, plugin_name)
 end
 
 local function ProcessFXTags()
-    local tags_file_path = reaper_api.GetResourcePath() .. "/reaper-fxtags.ini"
+    local tags_file_path = reaper_api.GetResourcePath() .. path_sep .. "reaper-fxtags.ini"
     local tags_content = ReadFileContents(tags_file_path)
     local is_developer_section = true
 
@@ -321,7 +321,7 @@ local function ProcessFXTags()
 end
 
 local function ProcessCustomCategories()
-    local favorites_file_path = reaper_api.GetResourcePath() .. "/reaper-fxfolders.ini"
+    local favorites_file_path = reaper_api.GetResourcePath() .. path_sep .. "reaper-fxfolders.ini"
     local favorites_content = ReadFileContents(favorites_file_path)
     local current_category_table
 
@@ -470,7 +470,7 @@ local function ProcessSmartFolder(search_query)
 end
 
 local function ProcessFavorites()
-    local favorites_path = reaper_api.GetResourcePath() .. "/reaper-fxfolders.ini"
+    local favorites_path = reaper_api.GetResourcePath() .. path_sep .. "reaper-fxfolders.ini"
     local favorites_data = ReadFileContents(favorites_path)
     favorites_data = OrganizeFoldersINI(favorites_data)
     CATEGORIES[#CATEGORIES + 1] = { name = "FOLDERS", list = {} }
@@ -560,13 +560,13 @@ end
 
 local function LoadFXChains()
     local fx_chains_collection = {}
-    ScanDirectoryRecursive(reaper_api.GetResourcePath() .. "/FXChains", fx_chains_collection, ".RfxChain")
+    ScanDirectoryRecursive(reaper_api.GetResourcePath() .. path_sep .. "FXChains", fx_chains_collection, ".RfxChain")
     return fx_chains_collection
 end
 
 local function LoadTrackTemplates()
     local track_templates_collection = {}
-    ScanDirectoryRecursive(reaper_api.GetResourcePath() .. "/TrackTemplates", track_templates_collection, ".RTrackTemplate")
+    ScanDirectoryRecursive(reaper_api.GetResourcePath() .. path_sep .. "TrackTemplates", track_templates_collection, ".RTrackTemplate")
     return track_templates_collection
 end
 

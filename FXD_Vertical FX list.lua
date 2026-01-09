@@ -13,10 +13,11 @@ local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
+local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
 local script_path = debug.getinfo(1, 'S').source:match('@?(.*/)')
-local FunctionFolder = script_path .. 'Vertical FX List Resources/Functions/'
+local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 
-dofile(FunctionFolder .. 'General functions.lua')
+dofile(FunctionFolder .. 'General Functions.Lua')
 --[[ arrange_hwnd  = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 0x3E8) -- client position
 
 _, Top_Arrang = reaper.JS_Window_ClientToScreen(arrange_hwnd, 0, 0)         -- convert to screen position (where clients x,y is actually on the screen)
@@ -390,7 +391,7 @@ local OPEN_SECTION = 'FXD_Vertical_FX_List'
 local OPEN_KEY     = 'OPEN'
 
 local function_folder = r.GetResourcePath() ..
-'/Vertical FX List/Vertical FX List Resources/Functions/'
+PATH_SEP .. 'Vertical FX List' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 dofile(function_folder..'FX Buttons.lua')
 dofile(function_folder..'Sends.lua')
 
@@ -1440,7 +1441,7 @@ local function NormalizeHyphensAndSpaces(text)
 end
 
 function ThirdPartyDeps()
-  local ultraschall_path = reaper.GetResourcePath() .. "/UserPlugins/ultraschall_api.lua"
+  local ultraschall_path = reaper.GetResourcePath() .. PATH_SEP .. "UserPlugins" .. PATH_SEP .. "ultraschall_api.lua"
   if ultraschall_path then dofile(ultraschall_path)end
   local version = tonumber (string.sub( reaper.GetAppVersion() ,  0, 4))
 
@@ -1525,7 +1526,7 @@ FX_Favorites_Order = FX_Favorites_Order or {} -- Ordered array of favorite FX na
 
 -- Favorites file path
 local function GetFavoritesFilePath()
-    return r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/fx_favorites.txt'
+    return r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'fx_favorites.txt'
 end
 
 -- Load favorites from file
@@ -1597,7 +1598,7 @@ end
 
 local function LoadFXCategories()
   local resource_path = r.GetResourcePath()
-  local fxtags_path = resource_path .. "/reaper-fxtags.ini"
+  local fxtags_path = resource_path .. PATH_SEP .. "reaper-fxtags.ini"
   
   -- Clear existing data (but preserve FX_LIST_TO_CATEGORIES if it was loaded from cache)
   FX_CATEGORIES = {}
@@ -1662,7 +1663,7 @@ end
 -- Get path for category cache file
 local function GetCategoryCachePath()
   local resource_path = r.GetResourcePath()
-  return resource_path .. "/Scripts/BRYAN's SCRIPTS/Vertical FX List Resources/fx_category_cache.lua"
+  return resource_path .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "fx_category_cache.lua"
 end
 
 -- Save category cache to file
@@ -1766,7 +1767,7 @@ local function GetPluginCountsPath()
       script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
     else
       -- Relative path
-      script_path = r.GetResourcePath() .. "/" .. script_path
+      script_path = r.GetResourcePath() .. PATH_SEP .. script_path
       script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
     end
     
@@ -1775,12 +1776,12 @@ local function GetPluginCountsPath()
       if not script_dir:match("[/\\]$") then
         script_dir = script_dir .. "/"
       end
-      return script_dir .. "Vertical FX List Resources/plugin_select_counts.txt"
+      return script_dir .. "Vertical FX List Resources" .. PATH_SEP .. "plugin_select_counts.txt"
     end
   end
   
   -- Fallback to old path
-  return r.GetResourcePath() .. "/Scripts/BRYAN's SCRIPTS/Vertical FX List Resources/plugin_select_counts.txt"
+  return r.GetResourcePath() .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "plugin_select_counts.txt"
 end
 
 -- Load plugin counts from file
@@ -4415,7 +4416,7 @@ end ]]
 local ctx = im.CreateContext('FX List', im.ConfigFlags_DockingEnable)
 ----------------------------------------------------------------------------------------
 
-local AndaleMonoVerticalPath = r.GetResourcePath() .. "/Scripts/BRYAN's SCRIPTS/Vertical FX List Resources/Functions/AndaleMonoVertical.ttf"
+local AndaleMonoVerticalPath = r.GetResourcePath() .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "Functions" .. PATH_SEP .. "AndaleMonoVertical.ttf"
 local AndaleMonoVertical
 if r.file_exists and r.file_exists(AndaleMonoVerticalPath) then
   AndaleMonoVertical = im.CreateFont(AndaleMonoVerticalPath, 12)
@@ -4857,7 +4858,7 @@ im.Attach(ctx, Font_Andale_Mono_16_BI)
 
 function attachImages()
   local imageFolder = r.GetResourcePath() ..
-     '/Scripts/BRYAN\'s SCRIPTS/Vertical FX List Resources/'
+     PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP
   Img = {
     StarHollow = im.CreateImage(imageFolder .. 'starHollow.png'),
     Star = im.CreateImage(imageFolder .. 'star.png'),
@@ -4911,7 +4912,7 @@ function attachImages()
   if Img.Trash then im.Attach(ctx, Img.Trash) end
   if Img.Search then im.Attach(ctx, Img.Search) end
   local graphPath = r.GetResourcePath() ..
-  '/Scripts/BRYAN\'s SCRIPTS/Vertical FX List Resources/graph.png'
+  PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP .. 'graph.png'
   Img.Graph = im.CreateImage(graphPath)
 
   im.Attach(ctx, Img.Graph)
@@ -6055,7 +6056,7 @@ local function GetStylePresetsDir()
       script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
     else
       -- Relative path, make it relative to resource path
-      script_path = r.GetResourcePath() .. "/" .. script_path
+      script_path = r.GetResourcePath() .. PATH_SEP .. script_path
       script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
     end
     
@@ -6069,11 +6070,11 @@ local function GetStylePresetsDir()
   end
   
   -- Fallback to old path if script path can't be determined
-  return r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/'
+  return r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP
 end
 
 local function GetStylePresetsFactoryPath()
-  return GetStylePresetsDir() .. 'style_presets_FACTORY.lua'
+  return GetStylePresetsDir() .. 'style_presets_FACTORY.lua'  -- Already cross-platform (no path separators needed)
 end
 
 local function GetStylePresetsUserPath()
@@ -6241,7 +6242,7 @@ local function LoadStylePresetsFromFile()
   -- Try multiple possible paths for ReaPack compatibility
   local factory_paths = {
     GetStylePresetsFactoryPath(), -- Script directory (for ReaPack)
-    r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/style_presets_FACTORY.lua', -- Fallback
+    r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'style_presets_FACTORY.lua', -- Fallback
   }
   
   local chunk = nil
@@ -6287,7 +6288,7 @@ local function LoadStylePresetsFromFile()
   -- Try multiple possible paths for ReaPack compatibility
   local user_paths = {
     GetStylePresetsUserPath(), -- Script directory (for ReaPack)
-    r.GetResourcePath() .. '/Scripts/BRYAN\'s SCRIPTS/style_presets_USER.lua', -- Fallback
+    r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'style_presets_USER.lua', -- Fallback
   }
   
   local user_chunk = nil

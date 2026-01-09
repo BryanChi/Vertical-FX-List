@@ -4,6 +4,7 @@
 -------------General Functions ------------------------------
 
 r = reaper
+local path_sep = package.config:sub(1, 1)
 
 
 
@@ -513,7 +514,7 @@ end
 function HideCursor(time)
     UserOS = r.GetOS()
     if UserOS == "OSX32" or UserOS == "OSX64" or UserOS == "macOS-arm64" then
-        Invisi_Cursor = reaper.JS_Mouse_LoadCursorFromFile(r.GetResourcePath() .. '/Cursors/Empty Cursor.cur')
+        Invisi_Cursor = reaper.JS_Mouse_LoadCursorFromFile(r.GetResourcePath() .. path_sep .. 'Cursors' .. path_sep .. 'Empty Cursor.cur')
     end
     mx, my = reaper.GetMousePosition()
     window = reaper.JS_Window_FromPoint(mx, my)
@@ -539,7 +540,7 @@ function HideCursorTillMouseUp(MouseBtn, ifneedctx)
     if ifneedctx then ctx = ifneedctx end
     UserOS = r.GetOS()
     if UserOS == "OSX32" or UserOS == "OSX64" or UserOS == "macOS-arm64" then
-        Invisi_Cursor = reaper.JS_Mouse_LoadCursorFromFile(r.GetResourcePath() .. '/Cursors/Empty Cursor.cur')
+        Invisi_Cursor = reaper.JS_Mouse_LoadCursorFromFile(r.GetResourcePath() .. path_sep .. 'Cursors' .. path_sep .. 'Empty Cursor.cur')
     end
 
     if r.ImGui_IsMouseClicked(ctx, MouseBtn) then
