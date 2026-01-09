@@ -9111,7 +9111,7 @@ function loop()
       -- clear for next frame
       HiddenOutlinesToDraw = {}
     end
-    im.Dummy(ctx,0,0)
+    im.Dummy(ctx,0,0) 
     im.End(ctx)
   end --end for Visible
 
