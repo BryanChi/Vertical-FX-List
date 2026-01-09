@@ -1658,7 +1658,7 @@ local function LoadFXCategories()
   
   file:close()
 end
-
+ 
 -- Get path for category cache file
 local function GetCategoryCachePath()
   return script_path .. "Vertical FX List Resources" .. PATH_SEP .. "fx_category_cache.lua"
