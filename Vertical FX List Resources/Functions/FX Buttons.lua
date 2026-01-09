@@ -773,10 +773,10 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     local styleColorPushCount = Push_clr_and_styles()
 
     -- Now push font (after style) so popping order remains: font first, then styles
-    -- Use Andale Mono font - use fixed size on Windows to prevent DPI scaling issues
+    -- Use Andale Mono font - always force fixed size on Windows
     local andaleMonoFont = Font_Andale_Mono_13 -- Default fallback
     if OS and OS:match('Win') then
-      -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+      -- On Windows, always use fixed 13pt font regardless of line height
       andaleMonoFont = Font_Andale_Mono_13
     else
       -- On other platforms, match font size based on line height
@@ -997,10 +997,10 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       do
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
-          -- Use bold+italic font - use fixed size on Windows to prevent DPI scaling issues
+          -- Use bold+italic font - always force fixed size on Windows
           local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
           if OS and OS:match('Win') then
-            -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+            -- On Windows, always use fixed 13pt font regardless of line height
             boldItalicFont = Font_Andale_Mono_13_BI
           else
             -- On other platforms, match font size based on line height
@@ -1551,10 +1551,10 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       do
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
-          -- Use bold+italic font - use fixed size on Windows to prevent DPI scaling issues
+          -- Use bold+italic font - always force fixed size on Windows
           local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
           if OS and OS:match('Win') then
-            -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+            -- On Windows, always use fixed 13pt font regardless of line height
             boldItalicFont = Font_Andale_Mono_13_BI
           else
             -- On other platforms, match font size based on line height
