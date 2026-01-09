@@ -22,7 +22,6 @@ VST3: ValhallaSupermassive (Valhalla DSP, LLC)	2
 VST3: ValhallaVintageVerb (Valhalla DSP, LLC)	2
 VST3: kHs Phaser (Kilohearts)	2
 VST3: kHs Reverb (Kilohearts)	2
-VST3i: Omnisphere (Spectrasonics) (18 out)	2
 VST: MDynamicsMBLarge (MeldaProduction)	2
 AU: ValhallaSpaceModulator (Valhalla DSP, LLC)	1
 AUi: Vital (Vital Audio)	1
@@ -49,7 +48,6 @@ VST3i: Kontakt 8 (Native Instruments) (64 out)	1
 VST3i: MDrummer (MeldaProduction) (32 out)	1
 VST3i: Speedrum2 (Apisonic) (32 out)	1
 VST3i: XO (XLN Audio) (18 out)	1
-VST: FabFilter Pro-C 2 (FabFilter)	1
 VST: MDynamics (MeldaProduction)	1
 VST: MDynamicsMB (MeldaProduction)	1
 VST: MReverb (MeldaProduction)	1

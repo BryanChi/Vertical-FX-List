@@ -37,7 +37,7 @@ local function ClearAllTables()
 end
 
 function CreatePluginFiles()
-    LoadPluginData()
+    LoadPluginDatabase()
     local plugin_data_serialized = ConvertTableToString(ALL_PLUGINS)
     SaveToFile(PLUGIN_DATA_FILE, plugin_data_serialized)
 

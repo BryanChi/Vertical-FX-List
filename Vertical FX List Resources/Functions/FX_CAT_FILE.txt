@@ -936,7 +936,7 @@
      [493] = "JS: MDCT Shifter [pitch/mdct-shift-01]",
      [494] = "JS: MDCT Sweeping Filter",
      [495] = "JS: MDCT Sweeping Filter [filters/mdct-volsweep]",
-     [496] = "JS: MegaGrit â€“ 3-Band + Feedback Distortion",
+     [496] = "JS: MegaGrit â\128\147 3-Band + Feedback Distortion",
      [497] = "JS: meters-01/Icon\13",
      [498] = "JS: meters/Icon\13",
      [499] = "JS: MGA JS Limiter",
@@ -4200,46 +4200,46 @@
  [4] = {
   list = {
    [1] = {
-    order = "0",
     name = "With shortcuts",
+    order = "0",
     fx = {
      [1] = "One Knobe Filter with mod wheel assigned.RfxChain",
     },
    },
    [2] = {
-    order = "1",
     name = "Favorites",
+    order = "1",
     fx = {
     },
    },
    [3] = {
-    order = "2",
     name = "Granite Chains",
+    order = "2",
     fx = {
      [1] = "Granite/Strings scape.RfxChain",
     },
    },
    [4] = {
-    order = "3",
     name = "Amps",
+    order = "3",
     fx = {
     },
    },
    [5] = {
-    order = "4",
     name = "@Waves",
+    order = "4",
     fx = {
     },
    },
    [6] = {
-    order = "5",
     name = "@GlitchMachines",
+    order = "5",
     fx = {
     },
    },
    [7] = {
-    order = "6",
     name = "midi",
+    order = "6",
     fx = {
      [1] = "JS: Audio To MIDI Drum Trigger",
      [2] = "JS: ForRetroRec(MIDI) v20151213",

@@ -1440,11 +1440,12 @@ local function NormalizeHyphensAndSpaces(text)
 end
 
 function ThirdPartyDeps()
- 
 
-  
+
+
       fx_browser = FunctionFolder .. "FX Parser.lua"
-  
+      dofile(fx_browser)
+
 end
 
 
@@ -9180,7 +9181,6 @@ function loop()
     if SaveNow then SaveSnapshotsToFile() end
     -- always persist latest snapshots on exit
     SaveSnapshotsToFile()
-    im.DestroyContext(ctx)
   end
 end
 

@@ -1646,7 +1646,7 @@
  [1645] = "JS: RCInflator (Oxford Edition)",
  [1646] = "JS: RCInflator 2 (Ideal Edition)",
  [1647] = "JS: RCInflator 2 (Oxford Edition)",
- [1648] = "JS: MegaGrit â€“ 3-Band + Feedback Distortion",
+ [1648] = "JS: MegaGrit â\128\147 3-Band + Feedback Distortion",
  [1649] = "JS: Loudener",
  [1650] = "JS: MIDI route via GMEM",
  [1651] = "JS: MIDI CC Mapper X",
