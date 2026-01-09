@@ -14,7 +14,7 @@ package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
 local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
-local script_path = debug.getinfo(1, 'S').source:match('@?(.*/)')
+local script_path = debug.getinfo(1, 'S').source:match('@?(.*[\\\\/])')
 local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 
 dofile(FunctionFolder .. 'General Functions.Lua')
@@ -390,8 +390,7 @@ DELETE_ANIM_STEP = DELETE_ANIM_STEP or 0.750
 local OPEN_SECTION = 'FXD_Vertical_FX_List'
 local OPEN_KEY     = 'OPEN'
 
-local function_folder = r.GetResourcePath() ..
-PATH_SEP .. 'Vertical FX List' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
+local function_folder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 dofile(function_folder..'FX Buttons.lua')
 dofile(function_folder..'Sends.lua')
 
@@ -1526,7 +1525,7 @@ FX_Favorites_Order = FX_Favorites_Order or {} -- Ordered array of favorite FX na
 
 -- Favorites file path
 local function GetFavoritesFilePath()
-    return r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'fx_favorites.txt'
+    return script_path .. 'fx_favorites.txt'
 end
 
 -- Load favorites from file
@@ -1662,8 +1661,7 @@ end
 
 -- Get path for category cache file
 local function GetCategoryCachePath()
-  local resource_path = r.GetResourcePath()
-  return resource_path .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "fx_category_cache.lua"
+  return script_path .. "Vertical FX List Resources" .. PATH_SEP .. "fx_category_cache.lua"
 end
 
 -- Save category cache to file
@@ -1754,34 +1752,7 @@ end
 
 -- Get path for plugin counts file
 local function GetPluginCountsPath()
-  -- Try to get script directory first (for ReaPack compatibility)
-  local script_path = debug.getinfo(1, "S").source
-  if script_path and script_path:sub(1, 1) == "@" then
-    script_path = script_path:sub(2) -- Remove the @ prefix
-  end
-  
-  if script_path then
-    local script_dir
-    if script_path:match("^[/\\]") or script_path:match("^[A-Za-z]:[/\\]") then
-      -- Absolute path
-      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
-    else
-      -- Relative path
-      script_path = r.GetResourcePath() .. PATH_SEP .. script_path
-      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
-    end
-    
-    if script_dir then
-      -- Ensure trailing slash
-      if not script_dir:match("[/\\]$") then
-        script_dir = script_dir .. "/"
-      end
-      return script_dir .. "Vertical FX List Resources" .. PATH_SEP .. "plugin_select_counts.txt"
-    end
-  end
-  
-  -- Fallback to old path
-  return r.GetResourcePath() .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "plugin_select_counts.txt"
+  return script_path .. "Vertical FX List Resources" .. PATH_SEP .. "plugin_select_counts.txt"
 end
 
 -- Load plugin counts from file
@@ -4416,7 +4387,7 @@ end ]]
 local ctx = im.CreateContext('FX List', im.ConfigFlags_DockingEnable)
 ----------------------------------------------------------------------------------------
 
-local AndaleMonoVerticalPath = r.GetResourcePath() .. PATH_SEP .. "Scripts" .. PATH_SEP .. "BRYAN's SCRIPTS" .. PATH_SEP .. "Vertical FX List Resources" .. PATH_SEP .. "Functions" .. PATH_SEP .. "AndaleMonoVertical.ttf"
+local AndaleMonoVerticalPath = script_path .. "Vertical FX List Resources" .. PATH_SEP .. "Functions" .. PATH_SEP .. "AndaleMonoVertical.ttf"
 local AndaleMonoVertical
 if r.file_exists and r.file_exists(AndaleMonoVerticalPath) then
   AndaleMonoVertical = im.CreateFont(AndaleMonoVerticalPath, 12)
@@ -4857,8 +4828,7 @@ im.Attach(ctx, Font_Andale_Mono_15_BI)
 im.Attach(ctx, Font_Andale_Mono_16_BI)
 
 function attachImages()
-  local imageFolder = r.GetResourcePath() ..
-     PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP
+  local imageFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP
   Img = {
     StarHollow = im.CreateImage(imageFolder .. 'starHollow.png'),
     Star = im.CreateImage(imageFolder .. 'star.png'),
@@ -4911,8 +4881,7 @@ function attachImages()
   if Img.Copy then im.Attach(ctx, Img.Copy) end
   if Img.Trash then im.Attach(ctx, Img.Trash) end
   if Img.Search then im.Attach(ctx, Img.Search) end
-  local graphPath = r.GetResourcePath() ..
-  PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'Vertical FX List Resources' .. PATH_SEP .. 'graph.png'
+  local graphPath = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'graph.png'
   Img.Graph = im.CreateImage(graphPath)
 
   im.Attach(ctx, Img.Graph)
@@ -6041,36 +6010,11 @@ end
 
 -- Style preset management
 local function GetStylePresetsDir()
-  -- Get the script's directory for ReaPack compatibility
-  -- debug.getinfo(1, "S").source returns something like "@path/to/script.lua"
-  local script_path = debug.getinfo(1, "S").source
-  if script_path and script_path:sub(1, 1) == "@" then
-    script_path = script_path:sub(2) -- Remove the @ prefix
+  -- Ensure trailing slash
+  if not script_path:match("[/\\]$") then
+    return script_path .. "/"
   end
-  
-  if script_path then
-    -- Handle both absolute and relative paths
-    local script_dir
-    if script_path:match("^[/\\]") or script_path:match("^[A-Za-z]:[/\\]") then
-      -- Absolute path (Unix or Windows)
-      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
-    else
-      -- Relative path, make it relative to resource path
-      script_path = r.GetResourcePath() .. PATH_SEP .. script_path
-      script_dir = script_path:match("^(.+)[/\\][^/\\]+$")
-    end
-    
-    if script_dir then
-      -- Ensure trailing slash
-      if not script_dir:match("[/\\]$") then
-        script_dir = script_dir .. "/"
-      end
-      return script_dir
-    end
-  end
-  
-  -- Fallback to old path if script path can't be determined
-  return r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP
+  return script_path
 end
 
 local function GetStylePresetsFactoryPath()
@@ -6239,28 +6183,17 @@ local function LoadStylePresetsFromFile()
   FactoryPresets = {}
   
   -- 1) Load FACTORY presets first
-  -- Try multiple possible paths for ReaPack compatibility
-  local factory_paths = {
-    GetStylePresetsFactoryPath(), -- Script directory (for ReaPack)
-    r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'style_presets_FACTORY.lua', -- Fallback
-  }
+  local factory_path = GetStylePresetsFactoryPath()
   
-  local chunk = nil
-  for _, factory_path in ipairs(factory_paths) do
-    chunk = loadfile(factory_path)
-    if chunk then break end
-    
+  local chunk = loadfile(factory_path)
+  if not chunk then
     -- Try manual file read as fallback
     local fh = io.open(factory_path, 'r')
     if fh then
       local src = fh:read('*all')
       fh:close()
       if src and #src > 0 then
-        local chunk2, err2 = load(src, '@style_presets_FACTORY.lua')
-        if chunk2 then
-          chunk = chunk2
-          break
-        end
+        chunk = load(src, '@style_presets_FACTORY.lua')
       end
     end
   end
@@ -6285,28 +6218,17 @@ local function LoadStylePresetsFromFile()
   end
 
   -- 2) Load USER presets (can override factory presets with same name)
-  -- Try multiple possible paths for ReaPack compatibility
-  local user_paths = {
-    GetStylePresetsUserPath(), -- Script directory (for ReaPack)
-    r.GetResourcePath() .. PATH_SEP .. 'Scripts' .. PATH_SEP .. 'BRYAN\'s SCRIPTS' .. PATH_SEP .. 'style_presets_USER.lua', -- Fallback
-  }
+  local user_path = GetStylePresetsUserPath()
   
-  local user_chunk = nil
-  for _, user_path in ipairs(user_paths) do
-    user_chunk = loadfile(user_path)
-    if user_chunk then break end
-    
+  local user_chunk = loadfile(user_path)
+  if not user_chunk then
     -- Try manual file read as fallback
     local fh = io.open(user_path, 'r')
     if fh then
       local src = fh:read('*all')
       fh:close()
       if src and #src > 0 then
-        local chunk2, err2 = load(src, '@style_presets_USER.lua')
-        if chunk2 then
-          user_chunk = chunk2
-          break
-        end
+        user_chunk = load(src, '@style_presets_USER.lua')
       end
     end
   end
