@@ -9142,7 +9142,7 @@ function loop()
     im.End(ctx)
   end --end for Visible
 
-
+ 
   -- Linked Plugin parameters ---------
 
   rv, tracknumber, fxnumber, paramnumber = r.GetLastTouchedFX()
