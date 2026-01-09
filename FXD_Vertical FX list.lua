@@ -1440,8 +1440,6 @@ local function NormalizeHyphensAndSpaces(text)
 end
 
 function ThirdPartyDeps()
-  local ultraschall_path = reaper.GetResourcePath() .. PATH_SEP .. "UserPlugins" .. PATH_SEP .. "ultraschall_api.lua"
-  if ultraschall_path then dofile(ultraschall_path)end
   local version = tonumber (string.sub( reaper.GetAppVersion() ,  0, 4))
 
 
@@ -9281,10 +9279,15 @@ function DeleteFXAutomation(track, fx)
     local env = r.GetFXEnvelope(track, fx, p, false)
     if env then
     local env = r.GetFXEnvelope(track, fx, p, false)
-      if ultraschall and ultraschall.AutomationItem_Delete then
-        local cntAI = r.CountAutomationItems(env)
-        for ai = cntAI-1, 0, -1 do
-          ultraschall.AutomationItem_Delete(env, ai, false) -- do not preserve points
+      -- Delete automation items using native REAPER API (DeleteEnvelopePointEx)
+      local cntAI = r.CountAutomationItems(env)
+      for ai = cntAI-1, 0, -1 do
+        if r.CountEnvelopePointsEx and r.DeleteEnvelopePointEx then
+          local pointCount = r.CountEnvelopePointsEx(env, ai)
+          -- Delete all points in this automation item (backwards to avoid index issues)
+          for pt = pointCount-1, 0, -1 do
+            r.DeleteEnvelopePointEx(env, ai, pt)
+          end
         end
       end
 
