@@ -1440,73 +1440,11 @@ local function NormalizeHyphensAndSpaces(text)
 end
 
 function ThirdPartyDeps()
-  local version = tonumber (string.sub( reaper.GetAppVersion() ,  0, 4))
+ 
 
-
-  local fx_browser_path
-  local n,arch = reaper.GetAppVersion():match("(.+)/(.+)")
-  local fx_browser_v6_path
   
-  if n:match("^7%.") then
       fx_browser = FunctionFolder .. "FX Parser.lua"
-  else
-      fx_browser = FunctionFolder .. "FX Parser.lua"
-      fx_browser_v6_path = FunctionFolder .. "FX Parser.lua"
-     fx_browser_reapack = 'sexan fx browser parser v6'
-
-  end
-  --local fx_browser_v6_path = reaper.GetResourcePath() .. "/Scripts/Sexan_Scripts/FX/Sexan_FX_Browser_Parser.lua"
-  --local fx_browser_v7_path = reaper.GetResourcePath() .. "/Scripts/Sexan_Scripts/FX/Sexan_FX_Browser_ParserV7.lua"
   
-  local reapack_process
-  local repos = {
-    {name = "Sexan_Scripts", url = 'https://github.com/GoranKovac/ReaScripts/raw/master/index.xml'},
-  }
-  
-  for i = 1, #repos do
-    local retinfo, url, enabled, autoInstall = reaper.ReaPack_GetRepositoryInfo( repos[i].name )
-    if not retinfo then
-      retval, error = reaper.ReaPack_AddSetRepository( repos[i].name, repos[i].url, true, 0 )
-      reapack_process = true
-    end
-  end
-  
-  -- ADD NEEDED REPOSITORIES
-  if reapack_process then
-    reaper.ShowMessageBox("Added Third-Party ReaPack Repositories", "ADDING REPACK REPOSITORIES", 0)
-    reaper.ReaPack_ProcessQueue(true)
-    reapack_process = nil
-  end
-  
-  if not reapack_process then
-    -- FX BROWSER
-    if reaper.file_exists(fx_browser) then
-        dofile(fx_browser)
-        -- Check if Filter_actions was loaded, if not provide a fallback
-        if not Filter_actions then
-            -- Fallback Filter_actions function if external script doesn't provide it
-            Filter_actions = function(filter_text)
-                if not FX_LIST or #FX_LIST == 0 then return {} end
-                if not filter_text or filter_text == '' then return FX_LIST end
-                
-                local filtered = {}
-                local filter_lower = filter_text:lower()
-                local filter_normalized = NormalizeHyphensAndSpaces(filter_lower)
-                for _, fx_name in ipairs(FX_LIST) do
-                    local fx_normalized = NormalizeHyphensAndSpaces(fx_name:lower())
-                    if fx_normalized:find(filter_normalized, 1, true) then
-                        table.insert(filtered, fx_name)
-                    end
-                end
-                return filtered
-            end
-        end
-    else
-       reaper.ShowMessageBox("Sexan FX BROWSER is needed.\nPlease Install it in next window", "MISSING DEPENDENCIES", 0)
-       reaper.ReaPack_BrowsePackages(fx_browser_reapack)
-       return 'error Sexan FX BROWSER'
-    end
-  end
 end
 
 
