@@ -7133,6 +7133,11 @@ local _0x8f9a = 0
 local _0x9b0c = 300
 
 function loop()
+  -- Check if SWS extension is installed
+  if not r.CF_ShellExecute then
+    local retval = r.ShowMessageBox("This script requires the SWS Extension to function properly.\n\nPlease download and install the SWS Extension from:\nhttps://sws-extension.org\n\nThe script will now exit.", "SWS Extension Required", 0)
+    return -- Exit script by not calling r.defer(loop)
+  end
 
   _0x8f9a = _0x8f9a + 1
   if _0x8f9a >= _0x9b0c then
@@ -9106,7 +9111,7 @@ function loop()
       -- clear for next frame
       HiddenOutlinesToDraw = {}
     end
-
+    im.Dummy(ctx,0,0)
     im.End(ctx)
   end --end for Visible
 
