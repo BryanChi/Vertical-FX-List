@@ -1450,11 +1450,10 @@ function ThirdPartyDeps()
   local fx_browser_v6_path
   
   if n:match("^7%.") then
-      fx_browser = reaper.GetResourcePath() .. "/Scripts/Sexan_Scripts/FX/Sexan_FX_Browser_ParserV7.lua"
-      fx_browser_reapack = 'sexan fx browser parser v7' 
+      fx_browser = FunctionFolder .. "FX Parser.lua"
   else
-      fx_browser= reaper.GetResourcePath() .. "/Scripts/Sexan_Scripts/FX/Sexan_FX_Browser_Parser.lua"  
-      fx_browser_v6_path = reaper.GetResourcePath() .. "/Scripts/Sexan_Scripts/FX/Sexan_FX_Browser_Parser.lua"
+      fx_browser = FunctionFolder .. "FX Parser.lua"
+      fx_browser_v6_path = FunctionFolder .. "FX Parser.lua"
      fx_browser_reapack = 'sexan fx browser parser v6'
 
   end
