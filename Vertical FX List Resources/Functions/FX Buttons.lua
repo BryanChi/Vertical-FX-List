@@ -773,21 +773,27 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     local styleColorPushCount = Push_clr_and_styles()
 
     -- Now push font (after style) so popping order remains: font first, then styles
-    -- Use Andale Mono font matching the current font size
-    local lineHeight = im.GetTextLineHeight(ctx)
+    -- Use Andale Mono font - use fixed size on Windows to prevent DPI scaling issues
     local andaleMonoFont = Font_Andale_Mono_13 -- Default fallback
-    -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-    if lineHeight <= 8 then andaleMonoFont = Font_Andale_Mono_6
-    elseif lineHeight <= 9 then andaleMonoFont = Font_Andale_Mono_7
-    elseif lineHeight <= 10 then andaleMonoFont = Font_Andale_Mono_8
-    elseif lineHeight <= 11 then andaleMonoFont = Font_Andale_Mono_9
-    elseif lineHeight <= 12 then andaleMonoFont = Font_Andale_Mono_10
-    elseif lineHeight <= 13 then andaleMonoFont = Font_Andale_Mono_11
-    elseif lineHeight <= 14 then andaleMonoFont = Font_Andale_Mono_12
-    elseif lineHeight <= 15 then andaleMonoFont = Font_Andale_Mono_13
-    elseif lineHeight <= 16 then andaleMonoFont = Font_Andale_Mono_14
-    elseif lineHeight <= 17 then andaleMonoFont = Font_Andale_Mono_15
-    else andaleMonoFont = Font_Andale_Mono_16
+    if OS and OS:match('Win') then
+      -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+      andaleMonoFont = Font_Andale_Mono_13
+    else
+      -- On other platforms, match font size based on line height
+      local lineHeight = im.GetTextLineHeight(ctx)
+      -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
+      if lineHeight <= 8 then andaleMonoFont = Font_Andale_Mono_6
+      elseif lineHeight <= 9 then andaleMonoFont = Font_Andale_Mono_7
+      elseif lineHeight <= 10 then andaleMonoFont = Font_Andale_Mono_8
+      elseif lineHeight <= 11 then andaleMonoFont = Font_Andale_Mono_9
+      elseif lineHeight <= 12 then andaleMonoFont = Font_Andale_Mono_10
+      elseif lineHeight <= 13 then andaleMonoFont = Font_Andale_Mono_11
+      elseif lineHeight <= 14 then andaleMonoFont = Font_Andale_Mono_12
+      elseif lineHeight <= 15 then andaleMonoFont = Font_Andale_Mono_13
+      elseif lineHeight <= 16 then andaleMonoFont = Font_Andale_Mono_14
+      elseif lineHeight <= 17 then andaleMonoFont = Font_Andale_Mono_15
+      else andaleMonoFont = Font_Andale_Mono_16
+      end
     end
     im.PushFont(ctx, andaleMonoFont)
 
@@ -991,22 +997,27 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       do
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
-          -- Use bold+italic font matching the current font size
-          -- Get current font size by checking text line height and matching to closest available size
-          local lineHeight = im.GetTextLineHeight(ctx)
+          -- Use bold+italic font - use fixed size on Windows to prevent DPI scaling issues
           local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
-          -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-          if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
-          elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
-          elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
-          elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
-          elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
-          elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
-          elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
-          elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
-          elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
-          elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
-          else boldItalicFont = Font_Andale_Mono_16_BI
+          if OS and OS:match('Win') then
+            -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+            boldItalicFont = Font_Andale_Mono_13_BI
+          else
+            -- On other platforms, match font size based on line height
+            local lineHeight = im.GetTextLineHeight(ctx)
+            -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
+            if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
+            elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
+            elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
+            elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
+            elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
+            elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
+            elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
+            elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
+            elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
+            elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
+            else boldItalicFont = Font_Andale_Mono_16_BI
+            end
           end
           im.PushFont(ctx, boldItalicFont)
           pushedSelFont = true
@@ -1540,21 +1551,27 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       do
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
-          -- Use bold+italic font matching the current font size
-          local lineHeight = im.GetTextLineHeight(ctx)
+          -- Use bold+italic font - use fixed size on Windows to prevent DPI scaling issues
           local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
-          -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-          if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
-          elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
-          elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
-          elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
-          elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
-          elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
-          elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
-          elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
-          elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
-          elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
-          else boldItalicFont = Font_Andale_Mono_16_BI
+          if OS and OS:match('Win') then
+            -- On Windows, use fixed font size to prevent high-DPI scaling from making buttons huge
+            boldItalicFont = Font_Andale_Mono_13_BI
+          else
+            -- On other platforms, match font size based on line height
+            local lineHeight = im.GetTextLineHeight(ctx)
+            -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
+            if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
+            elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
+            elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
+            elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
+            elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
+            elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
+            elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
+            elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
+            elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
+            elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
+            else boldItalicFont = Font_Andale_Mono_16_BI
+            end
           end
           im.PushFont(ctx, boldItalicFont)
           pushedSpecialFont = true

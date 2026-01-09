@@ -4260,9 +4260,35 @@ SendClr1, SendClr2 = Generate_Active_And_Hvr_CLRs(SendClr)
 local function getTrackPosAndHeight(track)
   if track then
     assert(track, "getTrackPosAndHeight: invalid parameter - track")
-
-    local height = r.GetMediaTrackInfo_Value(track, "I_WNDH") -- current TCP window height in pixels including envelopes
     local posy = r.GetMediaTrackInfo_Value(track, "I_TCPY")   -- current TCP window Y-position in pixels relative to top of arrange view
+    local height = r.GetMediaTrackInfo_Value(track, "I_WNDH") -- current TCP window height in pixels including envelopes
+
+    -- Windows only: derive master TCP height from first visible track position to avoid
+    -- slight over-reporting on Win builds (macOS left untouched).
+    if (OS == 'Win32' or OS == 'Win64') and track == r.GetMasterTrack(0) then
+      local firstVisibleY
+      local trackCount = r.GetNumTracks()
+      for i = 0, trackCount - 1 do
+        local tr = r.GetTrack(0, i)
+        if tr and r.GetMediaTrackInfo_Value(tr, 'B_SHOWINTCP') == 1 then
+          firstVisibleY = r.GetMediaTrackInfo_Value(tr, "I_TCPY")
+          break
+        end
+      end
+      -- Fallback to the first track even if hidden (still better than oversized master height)
+      if not firstVisibleY and trackCount > 0 then
+        local tr0 = r.GetTrack(0, 0)
+        if tr0 then firstVisibleY = r.GetMediaTrackInfo_Value(tr0, "I_TCPY") end
+      end
+
+      if firstVisibleY and posy then
+        local derivedHeight = firstVisibleY - posy
+        if derivedHeight > 0 then
+          height = derivedHeight
+        end
+      end
+    end
+
     return posy, height
   end
 end -- getTrackPosAndHeight()
