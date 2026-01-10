@@ -912,10 +912,8 @@ local function VerifyLicense(licenseKey)
   if activations then activations = tonumber(activations) end
   
   if not ok then
-    -- Show full response in error for debugging
     local errorMsg = reason or 'Verification failed'
     if not reason or reason == '' then
-      -- If no reason provided, show first 200 chars of response for debugging
       local responsePreview = response:sub(1, 200)
       errorMsg = 'Verification failed. Server response: ' .. responsePreview
     end
@@ -4257,6 +4255,55 @@ SendClr            = 0xC586C0ff
 SendClr1, SendClr2 = Generate_Active_And_Hvr_CLRs(SendClr)
 
 
+TRK_H_DIVIDER = 1  -- Default for macOS (no scaling)
+-- Windows: Will be set to DPI scale after detection in main loop
+-- Get DPI scale factor for the arrange window (Windows only)
+-- This accounts for display scaling that affects track coordinate alignment
+-- On Windows with DPI scaling, REAPER's I_TCPY values may be in logical pixels
+-- while ImGui uses physical pixels, causing misalignment that worsens with track height
+DPI_SCALE = nil -- Global: Cache the DPI scale factor (calculated once in first loop)
+local DPI_Method_Used = nil -- Track which method was used
+-- Derive an ImGui UI scale from the current font size (relative to a 13px baseline).
+-- This is used on Windows when REAPER reports no DPI scaling (1.0) but ImGui
+-- is effectively scaled down (e.g. font size 12 => scale ~0.923), which can
+-- cause growing misalignment for taller tracks. Return the direct scale
+-- (curSize / 13); values < 1 shrink our coordinates.
+local function GetImGuiFontScale(ctx_param)
+  if not ctx_param then return 1 end
+  local curSize = im.GetFontSize(ctx_param)
+  if curSize and curSize > 0 then
+    return curSize / 13 -- <1 means UI is smaller; shrink coordinates accordingly
+  end
+  return 1
+end
+local function getArrangeDPIScale(ctx_param)
+  if DPI_SCALE then
+    return DPI_SCALE
+  end
+  
+  
+  if OS and OS:match('Win') then
+    local mainHwnd = r.GetMainHwnd()
+    local arrange_hwnd = r.JS_Window_FindChildByID(mainHwnd, 0x3E8)
+    
+    if arrange_hwnd then
+      -- Method 1: Use ImGui_GetWindowDpiScale (REAPER API function)
+      -- This gets the DPI scale for the current ImGui window's viewport (1.0 = 96 DPI)
+      if ctx_param  then
+        local dpiScale = r.ImGui_GetWindowDpiScale(ctx_param)
+        if dpiScale and dpiScale > 0 and dpiScale ~= 1.0 then
+          DPI_SCALE = dpiScale
+          DPI_Method_Used = "Method1"
+          return DPI_SCALE
+        end
+      end
+      
+    end
+  end
+  
+  DPI_SCALE = 1.0 -- Default if no scaling detected
+  return DPI_SCALE
+end
 
 local function getTrackPosAndHeight(track)
   if track then
@@ -4289,6 +4336,7 @@ local function getTrackPosAndHeight(track)
         end
       end
     end
+
 
     return posy, height
   end
@@ -7198,6 +7246,26 @@ function loop()
   PatchLineShift = (PatchLineShift + PatchLineSpeed) % (Patch_Thick * 2)
 
   Top_Arrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file()))) + 5
+  if OS:match( 'Win') then
+    Top_Arrang = Top_Arrang -5
+  end
+
+  -- Calculate DPI scale for Windows track coordinate alignment fix
+  -- Calculate only once (first loop) - DPI_SCALE is cached globally
+  -- Pass ctx so Method 1 can use ImGui_GetWindowDpiScale
+  if OS and (OS == 'Win32' or OS == 'Win64') and not DPI_SCALE then
+    getArrangeDPIScale(ctx)
+    -- Use detected DPI scale as the track height divider
+    if DPI_SCALE and DPI_SCALE > 0 then
+      TRK_H_DIVIDER = DPI_SCALE
+    else
+      TRK_H_DIVIDER = 1  -- Fallback if no scale detected
+    end
+  elseif OS and (OS == 'Win32' or OS == 'Win64') and DPI_SCALE then
+    -- Already calculated, just use it
+    TRK_H_DIVIDER = DPI_SCALE
+  end
+  
   KeyboardShortcuts(ctx)
   -- Reset/update per-frame UI suppression flags
   if WetDryKnobDragging and not im.IsMouseDown(ctx, 0) then WetDryKnobDragging = false end
@@ -7718,8 +7786,6 @@ function loop()
     
     HiddenParentHoveredGUID = nil
     if not FDL then FDL = im.GetForegroundDrawList(ctx) end
-    im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, SpaceBtwnFXs)
-    im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 1)
     --AutoFocus(ctx)
     
     TrackCount = r.GetNumTracks()
@@ -7904,11 +7970,6 @@ function loop()
       MovFX.Lbl = {} ]]
     end
 
-    if Mods == Ctrl + Shift + Alt then
-      DebugMode = true
-    else
-      DebugMode = false
-    end
 
     if not im.IsMouseDown(ctx,0) then 
       Send_Drag_Prev = { }
@@ -8027,7 +8088,7 @@ function loop()
           SettingsWindow()
         end
 
-        im.SetCursorPosY(ctx, Top_Arrang + Trk[t].PosY - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0))
+        im.SetCursorPosY(ctx, Top_Arrang + Trk[t].PosY / TRK_H_DIVIDER - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0))
         local masterVisibility = r.GetMasterTrackVisibility()
         if masterVisibility == 2 or masterVisibility == 0 then hide = 0 else hide = 1 end
       else
@@ -8082,8 +8143,12 @@ function loop()
 
         Trk[t].PosY, Trk[t].H = getTrackPosAndHeight(Track)
         Trk[t].H = Trk[t].H - 1
-
-
+        if OS:match( 'Win') then
+        -- Set cursor position using TCPY relative to first visible TCP (Windows-only change;
+        -- macOS kept unaffected since FirstTCPY_ForAlign defaults to 0 and matches prior behaviour)
+        local trackCursorY = Top_Arrang + (Trk[t].PosY / TRK_H_DIVIDER - (FirstTCPY_ForAlign or 0) ) - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0)
+        im.SetCursorPosY(ctx, trackCursorY)
+        end
         local x, y = im.GetCursorScreenPos(ctx)
 
         -- When showing full-size hidden parents, accumulate bounds for ALL hidden ancestor folders using screen-space Y
@@ -8420,7 +8485,8 @@ function loop()
 
           local __prevFXPaneW = FXPane_W
           FXPane_W = fxPaneW
-          local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, Trk[t].H - HeightOfs, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
+
+          local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, (Trk[t].H - HeightOfs)/ TRK_H_DIVIDER, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
           if __opened then
             do
               local childPosX, childPosY = im.GetWindowPos(ctx)
@@ -8440,10 +8506,26 @@ function loop()
             ------Repeat for Every fx-------------------
             --------------------------------------------
 
-
-
+            -- Scale spacing down on Windows systems to reduce gaps between FX buttons
+            local fxSpacing = SpaceBtwnFXs
+            local fxFramePadding = 1
+            if OS and OS:match('Win') then
+              local curSize = im.GetFontSize(ctx)
+              if curSize and curSize > 0 then
+                local winUIScale = math.max(curSize / 13, 1)
+                if winUIScale >= 1 then
+                  -- On Windows with scaling, reduce spacing to eliminate gaps
+                  fxSpacing = 0
+                  fxFramePadding = 0
+                end
+              end
+            end
+            im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, fxSpacing)
+            im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, fxFramePadding)
 
             FXBtns(Track, nil,nil, t, ctx, nil, OPEN)
+
+            im.PopStyleVar(ctx, 2) -- Pop ItemSpacing and FramePadding
 
 
             function VolumeBar(ctx,BtnSize, i, SendOrRecv, animHeight )
@@ -8608,7 +8690,11 @@ function loop()
           else
             -- When snapshots are not shown, advance cursor by the same amount as the snapshots pane would
             -- to maintain consistent layout for subsequent tracks
-            im.Dummy(ctx, 0, Trk[t].H - HeightOfs)
+            local dummyH = Trk[t].H - HeightOfs
+            if OS and OS:match('Win') then
+              dummyH = dummyH / TRK_H_DIVIDER
+            end
+            im.Dummy(ctx, 0, dummyH)
             im.SameLine(ctx, nil, 0)
           end
 
@@ -8706,6 +8792,10 @@ function loop()
             Sep_H = Trk[t].H
           end
           local sepHeight = Sep_H - HeightOfs
+          -- Windows: Apply DPI scale divisor to separator height to match scaled track height
+          if OS and OS:match('Win') then
+            sepHeight = sepHeight / TRK_H_DIVIDER
+          end
           if PerTrackSendsHidden[TrkID] then
             -- Draw a 15px reveal button at the right edge when sends hidden
             im.PushStyleColor(ctx, im.Col_Button,        getClr(im.Col_FrameBgHovered))
@@ -9065,10 +9155,6 @@ function loop()
 
     PanAllActivePans(ctx,PanningTracks, t ,ACTIVE_PAN_V, PanningTracks_INV)
 
-
-    im.PopStyleVar(ctx)
-
-    im.PopStyleVar(ctx)
     PopStyle() -- Pop style editor styles
     im.PopStyleColor(ctx, PopClrTimes)
     im.PopFont(ctx)

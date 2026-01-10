@@ -257,6 +257,56 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
   inheritedAlpha = inheritedAlpha or 1
   if BtnSz == 'Auto Size' then BtnSz = AutoSize end
 
+  -- Derive an OS scaling factor (Windows only) so we can counter-scale fonts
+  -- and padding when HiDPI makes the FX buttons oversized.
+  local function GetWinUIScale()
+    if OS and OS:match('Win') then
+      local curSize = im.GetFontSize(ctx)
+      if curSize and curSize > 0 then
+        return math.max(curSize / 13, 1)
+      end
+    end
+    return 1
+  end
+  local winUIScale = GetWinUIScale()
+
+  -- Choose the closest Andale font size for the current line height, with
+  -- optional bold+italic variant.
+  local function ChooseAndaleFont(style)
+    local fonts = (style == 'bi') and {
+      {6,  Font_Andale_Mono_6_BI},  {7,  Font_Andale_Mono_7_BI},
+      {8,  Font_Andale_Mono_8_BI},  {9,  Font_Andale_Mono_9_BI},
+      {10, Font_Andale_Mono_10_BI}, {11, Font_Andale_Mono_11_BI},
+      {12, Font_Andale_Mono_12_BI}, {13, Font_Andale_Mono_13_BI},
+      {14, Font_Andale_Mono_14_BI}, {15, Font_Andale_Mono_15_BI},
+      {16, Font_Andale_Mono_16_BI},
+    } or {
+      {6,  Font_Andale_Mono_6},  {7,  Font_Andale_Mono_7},
+      {8,  Font_Andale_Mono_8},  {9,  Font_Andale_Mono_9},
+      {10, Font_Andale_Mono_10}, {11, Font_Andale_Mono_11},
+      {12, Font_Andale_Mono_12}, {13, Font_Andale_Mono_13},
+      {14, Font_Andale_Mono_14}, {15, Font_Andale_Mono_15},
+      {16, Font_Andale_Mono_16},
+    }
+
+    local lineHeight = im.GetTextLineHeight(ctx)
+    if winUIScale >= 1 then
+      lineHeight = lineHeight / winUIScale
+    end
+
+    local approxSize = lineHeight / 1.5 -- inverse of typical line-height scale
+    local bestFont = fonts[#fonts][2]
+    local bestDiff = math.huge
+    for _, entry in ipairs(fonts) do
+      local diff = math.abs(approxSize - entry[1])
+      if diff < bestDiff then
+        bestDiff = diff
+        bestFont = entry[2]
+      end
+    end
+    return bestFont
+  end
+
   if container then 
     FX_Ct = tonumber( select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')))
   end
@@ -603,6 +653,8 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       else
         -- Linked FX exists, display the link icon
         local LN = im.GetTextLineHeight(ctx)
+          LN = LN / (DPI_SCALE or 1) 
+        
         local linkTint = (Clr and Clr.LinkCable) or 0xffffffff
         if im.ImageButton(ctx, '##Link' .. fxID, Img.Link, LN, LN, nil, nil, nil, nil, nil, linkTint) then
           if out.trk[1] then 
@@ -773,28 +825,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     local styleColorPushCount = Push_clr_and_styles()
 
     -- Now push font (after style) so popping order remains: font first, then styles
-    -- Use Andale Mono font - always force fixed size on Windows
-    local andaleMonoFont = Font_Andale_Mono_13 -- Default fallback
-    if OS and OS:match('Win') then
-      -- On Windows, always use fixed 13pt font regardless of line height
-      andaleMonoFont = Font_Andale_Mono_13
-    else
-      -- On other platforms, match font size based on line height
-      local lineHeight = im.GetTextLineHeight(ctx)
-      -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-      if lineHeight <= 8 then andaleMonoFont = Font_Andale_Mono_6
-      elseif lineHeight <= 9 then andaleMonoFont = Font_Andale_Mono_7
-      elseif lineHeight <= 10 then andaleMonoFont = Font_Andale_Mono_8
-      elseif lineHeight <= 11 then andaleMonoFont = Font_Andale_Mono_9
-      elseif lineHeight <= 12 then andaleMonoFont = Font_Andale_Mono_10
-      elseif lineHeight <= 13 then andaleMonoFont = Font_Andale_Mono_11
-      elseif lineHeight <= 14 then andaleMonoFont = Font_Andale_Mono_12
-      elseif lineHeight <= 15 then andaleMonoFont = Font_Andale_Mono_13
-      elseif lineHeight <= 16 then andaleMonoFont = Font_Andale_Mono_14
-      elseif lineHeight <= 17 then andaleMonoFont = Font_Andale_Mono_15
-      else andaleMonoFont = Font_Andale_Mono_16
-      end
-    end
+    local andaleMonoFont = ChooseAndaleFont('regular')
     im.PushFont(ctx, andaleMonoFont)
 
     local retval,  renamed = r.TrackFX_GetNamedConfigParm(Track, fx, 'renamed_name')
@@ -861,6 +892,14 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     end
 
     -- Visual improvements: square corners and better border
+    local pushedStyleVars = 2
+    if winUIScale > 1 then
+      local pad = im.GetStyleVar(ctx, im.StyleVar_FramePadding)
+      local padX = (type(pad) == 'table' and (pad.x or pad[1])) or (type(pad) == 'number' and pad) or 6
+      local padY = (type(pad) == 'table' and (pad.y or pad[2])) or (type(pad) == 'number' and pad) or 6
+      im.PushStyleVar(ctx, im.StyleVar_FramePadding, padX / winUIScale, padY / winUIScale)
+      pushedStyleVars = pushedStyleVars + 1
+    end
     im.PushStyleVar(ctx, im.StyleVar_FrameBorderSize, 1)
     im.PushStyleVar(ctx, im.StyleVar_FrameRounding, 0) -- Square corners
       local autoBtnW = 0
@@ -974,7 +1013,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           Changing_FX_Name = nil
         end
         -- Pop FrameBorderSize and FrameRounding style vars
-        im.PopStyleVar(ctx, 2) -- FrameBorderSize and FrameRounding
+        im.PopStyleVar(ctx, pushedStyleVars) -- FramePadding (if pushed) + FrameBorderSize + FrameRounding
         styleVarsPopped = true
       else
       -- Store the button click state
@@ -998,27 +1037,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
           -- Use bold+italic font - always force fixed size on Windows
-          local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
-          if OS and OS:match('Win') then
-            -- On Windows, always use fixed 13pt font regardless of line height
-            boldItalicFont = Font_Andale_Mono_13_BI
-          else
-            -- On other platforms, match font size based on line height
-            local lineHeight = im.GetTextLineHeight(ctx)
-            -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-            if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
-            elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
-            elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
-            elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
-            elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
-            elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
-            elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
-            elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
-            elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
-            elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
-            else boldItalicFont = Font_Andale_Mono_16_BI
-            end
-          end
+          local boldItalicFont = ChooseAndaleFont('bi')
           im.PushFont(ctx, boldItalicFont)
           pushedSelFont = true
         end
@@ -1552,27 +1571,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         local trackGUID = r.GetTrackGUID(Track)
         if IsFXSelected(trackGUID, fx) then
           -- Use bold+italic font - always force fixed size on Windows
-          local boldItalicFont = Font_Andale_Mono_13_BI -- Default fallback
-          if OS and OS:match('Win') then
-            -- On Windows, always use fixed 13pt font regardless of line height
-            boldItalicFont = Font_Andale_Mono_13_BI
-          else
-            -- On other platforms, match font size based on line height
-            local lineHeight = im.GetTextLineHeight(ctx)
-            -- Match font size based on line height (approximate: line height ≈ font size * 1.2-1.3)
-            if lineHeight <= 8 then boldItalicFont = Font_Andale_Mono_6_BI
-            elseif lineHeight <= 9 then boldItalicFont = Font_Andale_Mono_7_BI
-            elseif lineHeight <= 10 then boldItalicFont = Font_Andale_Mono_8_BI
-            elseif lineHeight <= 11 then boldItalicFont = Font_Andale_Mono_9_BI
-            elseif lineHeight <= 12 then boldItalicFont = Font_Andale_Mono_10_BI
-            elseif lineHeight <= 13 then boldItalicFont = Font_Andale_Mono_11_BI
-            elseif lineHeight <= 14 then boldItalicFont = Font_Andale_Mono_12_BI
-            elseif lineHeight <= 15 then boldItalicFont = Font_Andale_Mono_13_BI
-            elseif lineHeight <= 16 then boldItalicFont = Font_Andale_Mono_14_BI
-            elseif lineHeight <= 17 then boldItalicFont = Font_Andale_Mono_15_BI
-            else boldItalicFont = Font_Andale_Mono_16_BI
-            end
-          end
+          local boldItalicFont = ChooseAndaleFont('bi')
           im.PushFont(ctx, boldItalicFont)
           pushedSpecialFont = true
         end
@@ -1600,7 +1599,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
     -- Pop FrameBorderSize and FrameRounding style vars (pushed at the beginning)
     -- Only pop if not already popped in renaming path
     if not styleVarsPopped then
-      im.PopStyleVar(ctx, 2)
+      im.PopStyleVar(ctx, pushedStyleVars)
     end
 
     -- Pop style colors using the tracked count
@@ -2468,24 +2467,18 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             if beforeOverride then
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, true)
             elseif container and targetIndex and targetIndex >= 0x2000000 then
-              r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack (MOVE): fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d)\n",
-                tostring(DraggingTrack_Data), draggedFX, tostring(Track), targetIndex, targetIndex))
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, true)
             else
               MoveFX(draggedFX, targetIndex, true, nil, DraggingTrack_Data, Track)
             end
           elseif Mods == Super then
             if beforeOverride or (container and targetIndex and targetIndex >= 0x2000000) then
-              r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack (COPY): fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d)\n",
-                tostring(DraggingTrack_Data), draggedFX, tostring(Track), targetIndex, targetIndex))
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
             else
               MoveFX(draggedFX, targetIndex, false, nil, DraggingTrack_Data, Track)
             end
           elseif Mods == Ctrl then --Pool FX
             if beforeOverride or (container and targetIndex and targetIndex >= 0x2000000) then
-              r.ShowConsoleMsg(string.format("  Calling TrackFX_CopyToTrack (POOL): fromTrack=%s, fromFX=%d, toTrack=%s, toIndex=0x%X (%d)\n",
-                tostring(DraggingTrack_Data), draggedFX, tostring(Track), targetIndex, targetIndex))
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
             else
               MoveFX(draggedFX, targetIndex, false, nil, DraggingTrack_Data, Track)
@@ -3004,8 +2997,15 @@ function Empty_FX_Space_Btn(ctx, T)
   im.PushStyleColor(ctx, im.Col_ButtonHovered, getClr(im.Col_FrameBgHovered))
   im.PushStyleColor(ctx, im.Col_ButtonActive, getClr(im.Col_FrameBgActive))
 
+  -- Windows: Apply same height divisor as track child to prevent misalignment
+  local btnHeight = T.H
+  if OS and OS:match('Win') then
+    -- Use TRK_H_DIVIDER which is set to the detected DPI scale
+    -- This ensures the empty button height matches the scaled child height
+    btnHeight = btnHeight / (TRK_H_DIVIDER or 1)
+  end
 
-  if im.Button(ctx, ' ##empty'..tostring(Track), FXPane_W, T.H) then
+  if im.Button(ctx, ' ##empty'..tostring(Track), FXPane_W, btnHeight) then
     if Mods == 0 then
       im.OpenPopup(ctx, 'Btwn FX Windows' ..tostring(Track))
 

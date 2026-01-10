@@ -6,8 +6,9 @@
 r = reaper
 local path_sep = package.config:sub(1, 1)
 
-
-
+function msg(str)
+    reaper.ShowConsoleMsg(str .. '\n')
+end
 
 function ChangeFX_Name(FX_Name)
     if FX_Name then

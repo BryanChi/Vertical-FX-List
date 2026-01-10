@@ -123,9 +123,6 @@ end
 
 function ConvertStringToTable(input_str)
     local compiled_func, error_msg = load("return " .. input_str)
-    if error_msg then
-        reaper_api.ShowConsoleMsg("\nerror" .. error_msg)
-    end
     return compiled_func and compiled_func() or nil
 end
 
@@ -462,9 +459,6 @@ local function ProcessSmartFolder(search_query)
 
     if compiled_function then
         local success, runtime_error = pcall(compiled_function)
-        if runtime_error then
-            reaper_api.ShowConsoleMsg("ERROR RUNNING SMART FOLDER CODE GEN : \n" .. runtime_error)
-        end
     end
     return matching_plugins
 end

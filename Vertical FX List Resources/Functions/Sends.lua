@@ -1615,7 +1615,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
         HoverEyes = true
         SetHelpHint('LMB = Hide Track')
       end
-      SL()
+      SL(nil, 0)
     end
     -- if hovering send, show solo icon (skip while animating deletion and while hover is blocked)
     if HoverSend == i .. TrkID and not AnySendAnimActive and not HoverBlocked and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) then
@@ -1626,7 +1626,12 @@ function Send_Btn(ctx, Track, t, BtnSize)
         im.PushStyleColor(ctx, im.Col_ButtonHovered, 0x00000000)
         im.PushStyleColor(ctx, im.Col_ButtonActive, 0x00000000)
       end
-      if im.Button(ctx, 'S', 14, 14) then -- Solo Button
+      -- On Windows, match solo button height to line height
+      local soloBtnH = 14
+      if OS and OS:match('Win') then
+        soloBtnH = 16
+      end
+      if im.Button(ctx, 'S', 14, soloBtnH) then -- Solo Button
         if Mods == 0 then
           if Dest_Valid then ToggleSolo(DestTrk) end
           --ToggleSolo(Track)
@@ -1666,7 +1671,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
         im.PopStyleColor(ctx, 4)
       end
       im.PopFont(ctx)
-      SL()
+      SL(nil, 0)
       BtnSizeOffset = BtnSizeOffset -20
     end
     im.PushStyleVar(ctx, im.StyleVar_ButtonTextAlign, 0.1, 0.5)
@@ -3370,7 +3375,7 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
       if im.IsItemHovered(ctx) then
         SetHelpHint('LMB = Show Hidden Track')
       end
-      SL()
+      SL(nil, 0)
       BtnSizeOffset = -HideBtnSz
     end
   end
@@ -3388,7 +3393,7 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
         HoverEyes = true
         SetHelpHint('LMB = Hide Track')
       end
-      SL()
+      SL(nil, 0)
       BtnSizeOffset =BtnSizeOffset -HideBtnSz
     end
   end
@@ -4384,8 +4389,9 @@ function Empty_Send_Btn(ctx, Track, t, T)
     im.SetDragDropPayload(ctx, 'DragSend', t)
 
     im.EndDragDropSource(ctx)
-    local cur = r.JS_Mouse_LoadCursor(7)
+--[[     local cur = r.JS_Mouse_LoadCursor(7)
     r.JS_Mouse_SetCursor(cur)
+ ]]    
     SendSrcPreview_X, SendSrcPreview_Y = im.GetItemRectMin(ctx)
   end
 
@@ -4404,7 +4410,7 @@ function Sends_List(ctx, t, HeightOfs, T)
 
 
 
-  if not im.BeginChild(ctx, 'Sends' .. t, Send_W, Trk[t].H-HeightOfs, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then return end 
+  if not im.BeginChild(ctx, 'Sends' .. t, Send_W, (Trk[t].H-HeightOfs)/ TRK_H_DIVIDER, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then return end 
   do
     local childPosX, childPosY = im.GetWindowPos(ctx)
     local childW, childH = im.GetWindowSize(ctx)
@@ -4620,9 +4626,17 @@ function Sends_List(ctx, t, HeightOfs, T)
   local winPosX, _ = im.GetWindowPos(ctx)
   local winPosX = winPosX + 8
   local winW       = ({im.GetWindowSize(ctx)})[1]
-  -- draw line at the current cursor Y (bottom of the just-drawn track row)
-  local _, sepY    = im.GetCursorScreenPos(ctx)
-  local sepY =sepY-1
+  -- draw line at the bottom of the sends child window (not cursor position, which may be off due to DPI scaling)
+  -- Use the stored child rect if available, otherwise fall back to cursor position
+  local sepY
+  if Trk and TrkID and Trk[TrkID] and Trk[TrkID].SendsChildRect then
+    -- Use the actual bottom of the child window
+    sepY = Trk[TrkID].SendsChildRect.B - 1
+  else
+    -- Fallback to cursor position
+    local _, cursorY = im.GetCursorScreenPos(ctx)
+    sepY = cursorY - 1
+  end
   im.DrawList_AddLine(winDL, winPosX, sepY, winPosX + winW, sepY, (Clr and Clr.TrackBoundaryLine) or im.GetColor(ctx, im.Col_Button), 3)
 
   -- pop # 3 childbg + hover + active
