@@ -607,9 +607,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             if into then
               if Mods == 0 then
                 r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFXIdxNum, Track, into, true)
-              elseif Mods == Super then
+              elseif (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and Mods == Super) then
                 r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFXIdxNum, Track, into, false)
-              elseif Mods == Ctrl then -- Pool FX (copy and link)
+              elseif (OS and OS:match('Win') and Mods == (Ctrl | Alt)) or (not (OS and OS:match('Win')) and Mods == Ctrl) then -- Pool FX (copy and link)
                 r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFXIdxNum, Track, into, false)
                 local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFXIdxNum)
                 FX = FX or {}
@@ -1465,9 +1465,17 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         end
         -- Show hint text for main FX button
         if isContainer then
-          SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Toggle Container Expand/Collapse', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          if OS and OS:match('Win') then
+            SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Toggle Container Expand/Collapse', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+Alt+LMB Drag Vertically = Copy & Link FX', 'Ctrl+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          else
+            SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Toggle Container Expand/Collapse', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          end
         else
-          SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          if OS and OS:match('Win') then
+            SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+Alt+LMB Drag Vertically = Copy & Link FX', 'Ctrl+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          else
+            SetHelpHint('LMB = Open FX Window', 'Shift+LMB = Toggle Bypass', 'Ctrl+Shift+LMB = Toggle Offline', 'RMB = Marquee Selection', 'Alt+RMB = Rename FX', 'LMB Drag Vertically = Reorder FX', 'LMB Drag Horizontally = Adjust Wet/Dry', 'Ctrl+LMB Drag Vertically = Copy & Link FX', 'Cmd+LMB Drag Vertically = Copy FX', 'Alt+LMB = Delete FX')
+          end
         end
       end
       -- Toggle container collapse/expand with right-click (ignore key modifiers, except Alt)
@@ -1665,7 +1673,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         local trackGUID = r.GetTrackGUID(DraggingTrack_Data)
         local sel = MarqueeSelection and MarqueeSelection.selectedFXs and MarqueeSelection.selectedFXs[trackGUID]
         local hasSelection = sel and #sel > 0
-        local cmdHeld = (Mods & Super) ~= 0
+        local cmdHeld = (OS and OS:match('Win') and (Mods & Ctrl) ~= 0) or (not (OS and OS:match('Win')) and (Mods & Super) ~= 0)
         local draggedGUID = r.TrackFX_GetFXGUID(DraggingTrack_Data, fx)
         
         
@@ -1720,9 +1728,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         im.SetDragDropPayload(ctx, 'DragFX', fx)
         -- Check if cmd is held for copy icon display (re-check during drag)
         local currentMods = im.GetKeyMods(ctx)
-        local cmdHeldNow = (currentMods & Super) ~= 0
-        local ctrlHeldNow = (currentMods & Ctrl) ~= 0
-        -- Draw copy icon at mouse position in foreground when cmd is held
+        local cmdHeldNow = (OS and OS:match('Win') and (currentMods & Ctrl) ~= 0) or (not (OS and OS:match('Win')) and (currentMods & Super) ~= 0)
+        local linkHeldNow = (OS and OS:match('Win') and (currentMods & Ctrl) ~= 0 and (currentMods & Alt) ~= 0) or (not (OS and OS:match('Win')) and (currentMods & Ctrl) ~= 0)
+        -- Draw copy icon at mouse position in foreground when cmd/ctrl is held
         if cmdHeldNow and Img and Img.Copy then
           local mx, my = im.GetMousePos(ctx)
           local iconSz = 16
@@ -1735,8 +1743,8 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           local plusY = iconY - 4
           im.DrawList_AddText(FDL, plusX, plusY, 0xffffffff, '+')
         end
-        -- Draw link icon at mouse position in foreground when ctrl is held
-        if ctrlHeldNow and Img and Img.Link then
+        -- Draw link icon at mouse position in foreground when ctrl+alt (Windows) or ctrl (Mac) is held
+        if linkHeldNow and Img and Img.Link then
           local mx, my = im.GetMousePos(ctx)
           local iconSz = 16
           local iconX = mx + 10  -- offset to the right of cursor
@@ -2004,7 +2012,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         local srcTrackGUID = DraggingTrack_Data and r.GetTrackGUID(DraggingTrack_Data)
         local selGuids = srcTrackGUID and MarqueeSelection and MarqueeSelection.selectedFXs and MarqueeSelection.selectedFXs[srcTrackGUID]
         local snap = srcTrackGUID and MultiMoveSnapshot and MultiMoveSnapshot[srcTrackGUID]
-        local cmdHeld = (Mods & Super) ~= 0
+        local cmdHeld = (OS and OS:match('Win') and (Mods & Ctrl) ~= 0) or (not (OS and OS:match('Win')) and (Mods & Super) ~= 0)
         local didBatch = false
         
         
@@ -2471,13 +2479,13 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             else
               MoveFX(draggedFX, targetIndex, true, nil, DraggingTrack_Data, Track)
             end
-          elseif Mods == Super then
+          elseif (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and Mods == Super) then
             if beforeOverride or (container and targetIndex and targetIndex >= 0x2000000) then
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
             else
               MoveFX(draggedFX, targetIndex, false, nil, DraggingTrack_Data, Track)
             end
-          elseif Mods == Ctrl then --Pool FX
+          elseif (OS and OS:match('Win') and Mods == (Ctrl | Alt)) or (not (OS and OS:match('Win')) and Mods == Ctrl) then --Pool FX
             if beforeOverride or (container and targetIndex and targetIndex >= 0x2000000) then
               r.TrackFX_CopyToTrack(DraggingTrack_Data, draggedFX, Track, targetIndex, false)
             else
@@ -2514,11 +2522,13 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           end
         else
           -- Batch prepared. If copying (Cmd/Super or Ctrl), set flags similar to MoveFX behavior
-          if Mods == Super or Mods == Ctrl then
+          local isCopyMod = (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and (Mods == Super or Mods == Ctrl))
+          local isLinkMod = (OS and OS:match('Win') and Mods == (Ctrl | Alt)) or (not (OS and OS:match('Win')) and Mods == Ctrl)
+          if isCopyMod or isLinkMod then
             NeedCopyFX = true
             DropPos = fx
-            if Mods == Ctrl then
-              -- For multi-selection Ctrl+drag, store all original GUIDs for linking
+            if isLinkMod then
+              -- For multi-selection Ctrl+Alt+drag (Windows) or Ctrl+drag (Mac), store all original GUIDs for linking
               if selGuids and #selGuids > 1 then
                 NeedLinkFXsGUIDs = {}
                 for _, guid in ipairs(selGuids) do
@@ -3078,7 +3088,7 @@ function Empty_FX_Space_Btn(ctx, T)
       local srcTrackGUID = DraggingTrack_Data and r.GetTrackGUID(DraggingTrack_Data)
       local selGuids = srcTrackGUID and MarqueeSelection and MarqueeSelection.selectedFXs and MarqueeSelection.selectedFXs[srcTrackGUID]
       local snap = srcTrackGUID and MultiMoveSnapshot and MultiMoveSnapshot[srcTrackGUID]
-      local cmdHeld = (Mods & Super) ~= 0
+      local cmdHeld = (OS and OS:match('Win') and (Mods & Ctrl) ~= 0) or (not (OS and OS:match('Win')) and (Mods & Super) ~= 0)
       local didBatch = false
 
       -- Treat empty-area drop the same as dropping after the last FX slot
@@ -3202,9 +3212,9 @@ function Empty_FX_Space_Btn(ctx, T)
       if not didBatch then
         if Mods == 0 then 
           MoveFX(draggedFX, appendPos, true, nil, DraggingTrack_Data, Track)
-        elseif Mods == Super then
+        elseif (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and Mods == Super) then
           MoveFX(draggedFX, appendPos, false, nil, DraggingTrack_Data, Track)
-        elseif Mods == Ctrl then --Pool FX
+        elseif (OS and OS:match('Win') and Mods == (Ctrl | Alt)) or (not (OS and OS:match('Win')) and Mods == Ctrl) then --Pool FX
           MoveFX(draggedFX, appendPos, false, nil, DraggingTrack_Data, Track)
           local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
           FX = FX or {}
@@ -3218,15 +3228,17 @@ function Empty_FX_Space_Btn(ctx, T)
           end
         end
       else
-        if Mods == Super or Mods == Ctrl then
+        local isCopyMod = (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and (Mods == Super or Mods == Ctrl))
+        local isLinkMod = (OS and OS:match('Win') and Mods == (Ctrl | Alt)) or (not (OS and OS:match('Win')) and Mods == Ctrl)
+        if isCopyMod or isLinkMod then
           NeedCopyFX = true
           DropPos = appendPos
-          if Mods == Ctrl then
+          if isLinkMod then
             -- Check if this is a multi-selection drag
             local trackGUID = r.GetTrackGUID(DraggingTrack_Data)
             local selGuids = MarqueeSelection and MarqueeSelection.selectedFXs and MarqueeSelection.selectedFXs[trackGUID]
             if selGuids and #selGuids > 1 then
-              -- Multi-selection Ctrl+drag: store all original GUIDs for linking
+              -- Multi-selection Ctrl+Alt+drag (Windows) or Ctrl+drag (Mac): store all original GUIDs for linking
               NeedLinkFXsGUIDs = {}
               for _, guid in ipairs(selGuids) do
                 NeedLinkFXsGUIDs[guid] = true

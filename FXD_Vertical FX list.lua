@@ -5718,15 +5718,29 @@ local function GetStyleData()
 end
 
 local function CopyStyleData(source, target)
-  -- sizes/style vars no longer copied
+  -- Copy colors
   for i, value in pairs(source.colors) do
     target.colors[i] = value
   end
-  -- carry element-specific colors if present
+  -- Copy vars
+  if not target.vars then target.vars = {} end
+  if source.vars then
+    for k, v in pairs(source.vars) do
+      target.vars[k] = v
+    end
+  end
+  -- Copy element-specific colors
   target.element_colors = {}
   if source.element_colors then
     for k, v in pairs(source.element_colors) do
       target.element_colors[k] = v
+    end
+  end
+  -- Copy Custom_Style settings (like TrackColorTintIntensity)
+  target.Custom_Style = {}
+  if source.Custom_Style then
+    for k, v in pairs(source.Custom_Style) do
+      target.Custom_Style[k] = v
     end
   end
 end
@@ -5766,24 +5780,30 @@ local function PushStyle()
     
     local pushed_var_count = 0
     for i, value in pairs(OPEN.style_editor.style.vars) do
-      if vec2_vars[i] then
-        -- This variable requires two values
-        if type(value) == 'table' and #value == 2 then
-          im.PushStyleVar(ctx, i, value[1], value[2])
+      -- Skip string keys (custom vars like TrackColorTintIntensity) - they're not ImGui style vars
+      if type(i) == 'string' then
+        -- Skip custom string vars, they're not ImGui style variables
+      elseif type(i) == 'number' then
+        -- Only process numeric keys which are ImGui style variable enums
+        if vec2_vars[i] then
+          -- This variable requires two values
+          if type(value) == 'table' and #value == 2 then
+            im.PushStyleVar(ctx, i, value[1], value[2])
+          else
+            -- Fallback: use the value twice if it's not a table
+            local val = type(value) == 'table' and value[1] or value
+            im.PushStyleVar(ctx, i, val, val)
+          end
         else
-          -- Fallback: use the value twice if it's not a table
-          local val = type(value) == 'table' and value[1] or value
-          im.PushStyleVar(ctx, i, val, val)
+          -- Single value variable
+          if type(value) == 'table' then
+            im.PushStyleVar(ctx, i, value[1])
+          else
+            im.PushStyleVar(ctx, i, value)
+          end
         end
-      else
-        -- Single value variable
-        if type(value) == 'table' then
-          im.PushStyleVar(ctx, i, value[1])
-        else
-          im.PushStyleVar(ctx, i, value)
-        end
+        pushed_var_count = pushed_var_count + 1
       end
-      pushed_var_count = pushed_var_count + 1
     end
     
     local pushed_color_count = 0
@@ -5896,6 +5916,33 @@ local function ShowStyleEditor()
   end
   im.SameLine(ctx, 0, 20)
   HelpMarker('Enable/disable borders around UI elements')
+
+  -- Track Color Tint Intensity slider
+  im.Spacing(ctx)
+  im.SeparatorText(ctx, 'Track Color Tint')
+  local tint_key = 'TrackColorTintIntensity'
+  if not OPEN.style_editor.style.vars then OPEN.style_editor.style.vars = {} end
+  -- Initialize from loaded preset if available, otherwise use default
+  if not OPEN.style_editor.style.vars[tint_key] then
+    local default_value = 1.0
+    -- Check if a preset is loaded and has Custom_Style
+    if OPEN.loaded_preset_name and OPEN.style_presets and OPEN.style_presets[OPEN.loaded_preset_name] then
+      local preset = OPEN.style_presets[OPEN.loaded_preset_name]
+      if preset.Custom_Style and preset.Custom_Style.TrackColorTintIntensity then
+        default_value = preset.Custom_Style.TrackColorTintIntensity
+      end
+    end
+    OPEN.style_editor.style.vars[tint_key] = default_value
+  end
+  local tint_value = OPEN.style_editor.style.vars[tint_key]
+  im.PushItemWidth(ctx, -1)
+  local rv, new_tint = im.SliderDouble(ctx, 'FX List Area Tint Intensity', tint_value, 0.0, 1.0, '%.2f')
+  if rv then
+    OPEN.style_editor.style.vars[tint_key] = new_tint
+  end
+  im.PopItemWidth(ctx)
+  im.SameLine(ctx, 0, 8)
+  HelpMarker('Controls how much the track color tints the FX list area background. 0.0 = no tint, 1.0 = full tint')
 
   -- Color sections in scrollable child
   im.Spacing(ctx)
@@ -6036,6 +6083,30 @@ local function GetStylePresetsUserPath()
   return GetStylePresetsDir() .. 'style_presets_USER.lua'
 end
 
+-- Utility: sanitize var keys (remove wrapping [[ ]], [ ], quotes)
+local function SanitizeVarKey(k)
+  if type(k) ~= 'string' then return k end
+  local s = tostring(k)
+  -- trim whitespace
+  s = s:match('^%s*(.-)%s*$') or s
+  -- repeatedly strip matching leading/trailing brackets if present
+  local changed = true
+  while changed do
+    changed = false
+    local stripped = s:match('^%[(.*)%]$')
+    if stripped then
+      s = stripped
+      changed = true
+    end
+  end
+  -- strip surrounding quotes
+  s = s:match('^"(.*)"$') or s
+  s = s:match("^'(.*)'$") or s
+  -- final trim
+  s = s:match('^%s*(.-)%s*$') or s
+  return s
+end
+
 -- Track which presets are factory (read-only, shipped with script)
 local FactoryPresets = {}
 -- Track which presets are user-created/modified (should be saved to USER file)
@@ -6053,27 +6124,47 @@ local function SaveStylePresetsToFile()
      end
    end
    
+   -- If no user presets to save, don't create an empty file
+   if not next(user_presets) then return end
+   
+   -- Ensure directory exists before writing file
+   local user_path = GetStylePresetsUserPath()
+   local dir_path = user_path:match('^(.+)[/\\][^/\\]+$')
+   if dir_path then
+     r.RecursiveCreateDirectory(dir_path, 0)
+   end
+   
    -- Write USER presets to Lua file
-   local lua_file = io.open(GetStylePresetsUserPath(), 'w')
+   local lua_file = io.open(user_path, 'w')
    if lua_file then
      lua_file:write('return {\n')
      local first_preset = true
      for preset_name, preset_data in pairs(user_presets) do
        if not first_preset then lua_file:write(',\n') end
        first_preset = false
-       lua_file:write(('  ["%s"] = {\n'):format(preset_name))
-       lua_file:write('    vars = {\n')
-       local first_var = true
-       for i, value in pairs(preset_data.vars) do
-         if not first_var then lua_file:write(',\n') end
-         first_var = false
-         if type(value) == 'table' then
-           lua_file:write(('      [%d] = { %s, %s }'):format(i, tostring(value[1]), tostring(value[2])))
-         else
-           lua_file:write(('      [%d] = %s'):format(i, tostring(value)))
-         end
-       end
-       lua_file:write('\n    },\n')
+      lua_file:write(('  ["%s"] = {\n'):format(preset_name))
+      lua_file:write('    vars = {\n')
+      local first_var = true
+      for k, value in pairs(preset_data.vars) do
+        if not first_var then lua_file:write(',\n') end
+        first_var = false
+        -- Handle both numeric keys (ImGui style vars) and string keys (custom vars)
+        local key_str
+        if type(k) == 'string' then
+          local clean_key = SanitizeVarKey(k)
+          -- Escape quotes in the cleaned key name and wrap in brackets
+          local escaped_key = clean_key:gsub('"', '\\"')
+          key_str = ('["%s"]'):format(escaped_key)
+        else
+          key_str = tostring(k)
+        end
+        if type(value) == 'table' then
+          lua_file:write(('      [%s] = { %s, %s }'):format(key_str, tostring(value[1]), tostring(value[2])))
+        else
+          lua_file:write(('      [%s] = %s'):format(key_str, tostring(value)))
+        end
+      end
+      lua_file:write('\n    },\n')
        lua_file:write('    colors = {\n')
        local first_color = true
        for i, value in pairs(preset_data.colors) do
@@ -6091,6 +6182,12 @@ local function SaveStylePresetsToFile()
          local v = (preset_data.element_colors and preset_data.element_colors[key]) or (Clr and Clr[key]) or 0
          lua_file:write(('      ["%s"] = %d'):format(key, v))
        end
+       lua_file:write('\n    },\n')
+       -- Custom style settings (like TrackColorTintIntensity)
+       lua_file:write('    Custom_Style = {\n')
+       local custom_style = preset_data.Custom_Style or {}
+       local tint_value = custom_style.TrackColorTintIntensity or 1.0
+       lua_file:write(('      TrackColorTintIntensity = %s'):format(tostring(tint_value)))
        lua_file:write('\n    }\n  }')
      end
      lua_file:write('\n}\n')
@@ -6104,11 +6201,25 @@ local function SaveStylePreset(name)
   end
   
   if OPEN.style_editor then
+    -- Get TrackColorTintIntensity from vars or default
+    local tint_value = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+    
     OPEN.style_presets[name] = {
       vars = {},
       colors = {},
-      element_colors = GetCustomClrPreset()
+      element_colors = GetCustomClrPreset(),
+      Custom_Style = {
+        TrackColorTintIntensity = tint_value
+      }
     }
+    
+    -- Save vars (excluding TrackColorTintIntensity which is now in Custom_Style)
+    for k, value in pairs(OPEN.style_editor.style.vars) do
+      if k ~= 'TrackColorTintIntensity' then  -- Skip TrackColorTintIntensity, it's in Custom_Style
+        local clean_key = SanitizeVarKey(k)
+        OPEN.style_presets[name].vars[clean_key] = value
+      end
+    end
     
     for i, value in pairs(OPEN.style_editor.style.colors) do
       OPEN.style_presets[name].colors[i] = value
@@ -6127,10 +6238,28 @@ local function LoadStylePreset(name)
     if not OPEN.style_editor then
       OPEN.style_editor = { style = GetStyleData(), ref = GetStyleData(), output_dest = 0, output_prefix = 0, output_only_modified = true, push_count = 0 }
     end
+    -- Load vars
+    if OPEN.style_presets[name].vars then
+      for k, value in pairs(OPEN.style_presets[name].vars) do
+        OPEN.style_editor.style.vars[k] = value
+      end
+    end
     for i, value in pairs(OPEN.style_presets[name].colors) do
       OPEN.style_editor.style.colors[i] = value
     end
     ApplyCustomClrPreset(OPEN.style_presets[name].element_colors)
+    -- Load Custom_Style settings (like TrackColorTintIntensity)
+    if OPEN.style_presets[name].Custom_Style then
+      local custom_style = OPEN.style_presets[name].Custom_Style
+      if custom_style.TrackColorTintIntensity then
+        if not OPEN.style_editor.style.vars then OPEN.style_editor.style.vars = {} end
+        OPEN.style_editor.style.vars['TrackColorTintIntensity'] = custom_style.TrackColorTintIntensity
+      end
+    else
+      -- If preset doesn't have Custom_Style, set default value to match what dirty check expects
+      if not OPEN.style_editor.style.vars then OPEN.style_editor.style.vars = {} end
+      OPEN.style_editor.style.vars['TrackColorTintIntensity'] = 1.0
+    end
   end
 end
 
@@ -6140,9 +6269,43 @@ local function IsStyleDirty()
   if not name then return false end
   local p = OPEN.style_presets and OPEN.style_presets[name]
   if not p or not OPEN.style_editor then return false end
+  -- Check colors
   for i, v in pairs(p.colors or {}) do
     if OPEN.style_editor.style.colors[i] ~= v then return true end
   end
+  -- Check vars (excluding TrackColorTintIntensity which is stored in Custom_Style)
+  local current_vars = OPEN.style_editor.style.vars or {}
+  local preset_vars = p.vars or {}
+  for k, preset_v in pairs(preset_vars) do
+    if k ~= 'TrackColorTintIntensity' then  -- Skip TrackColorTintIntensity, it's in Custom_Style
+      local current_v = current_vars[k]
+      if preset_v ~= current_v then return true end
+    end
+  end
+  for k, current_v in pairs(current_vars) do
+    if k ~= 'TrackColorTintIntensity' then  -- Skip TrackColorTintIntensity, it's in Custom_Style
+      local preset_v = preset_vars[k]
+      if preset_v == nil and current_v ~= nil then
+        return true
+      elseif preset_v ~= current_v then
+        return true
+      end
+    end
+  end
+  
+  -- Check Custom_Style settings (like TrackColorTintIntensity)
+  local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+  local preset_custom = p.Custom_Style or {}
+  local preset_tint = preset_custom.TrackColorTintIntensity
+  -- If preset has Custom_Style with TrackColorTintIntensity, compare directly
+  if preset_tint ~= nil then
+    if current_tint ~= preset_tint then return true end
+  -- If preset doesn't have Custom_Style, treat it as having default value (1.0)
+  -- Only mark dirty if current differs from default
+  elseif current_tint ~= 1.0 then
+    return true
+  end
+  -- Check element colors
   local curElems = GetCustomClrPreset and GetCustomClrPreset()
   if p.element_colors and curElems then
     for k, v in pairs(curElems) do
@@ -6214,9 +6377,16 @@ local function LoadStylePresetsFromFile()
     if ok and type(data) == 'table' then
       for preset_name, preset_data in pairs(data) do
         if preset_data and type(preset_data) == 'table' and preset_data.vars and preset_data.colors then
-          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors }
+          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors, Custom_Style = preset_data.Custom_Style }
           for k, v in pairs(preset_data.vars) do
-            OPEN.style_presets[preset_name].vars[tonumber(k)] = v
+            -- Handle both numeric keys (ImGui style vars) and string keys (custom vars)
+            local cleaned_key = SanitizeVarKey(k)
+            local key = tonumber(cleaned_key)
+            if key then
+              OPEN.style_presets[preset_name].vars[key] = v
+            else
+              OPEN.style_presets[preset_name].vars[cleaned_key] = v
+            end
           end
           for k, v in pairs(preset_data.colors) do
             OPEN.style_presets[preset_name].colors[tonumber(k)] = v
@@ -6248,10 +6418,29 @@ local function LoadStylePresetsFromFile()
     local ok, data = pcall(user_chunk)
     if ok and type(data) == 'table' then
       for preset_name, preset_data in pairs(data) do
-        if preset_data and type(preset_data) == 'table' and preset_data.vars and preset_data.colors then
-          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors }
+        if preset_data and type(preset_data) == 'table' then
+          -- Ensure vars and colors tables exist
+          if not preset_data.vars then preset_data.vars = {} end
+          if not preset_data.colors then preset_data.colors = {} end
+          
+          OPEN.style_presets[preset_name] = { vars = {}, colors = {}, element_colors = preset_data.element_colors, Custom_Style = preset_data.Custom_Style }
           for k, v in pairs(preset_data.vars) do
-            OPEN.style_presets[preset_name].vars[tonumber(k)] = v
+            -- Handle both numeric keys (ImGui style vars) and string keys (custom vars)
+            -- Sanitize string keys that may have been saved with extra quotes or [[...]] wrapping
+            local cleaned_key = k
+            if type(cleaned_key) == 'string' then
+              cleaned_key = cleaned_key:gsub('^%[%[(.*)%]%]$', '%1') -- [[...]]
+              cleaned_key = cleaned_key:gsub('^\"(.*)\"$', '%1')      -- "..."
+              cleaned_key = cleaned_key:gsub("^'(.*)'$", '%1')        -- '...'
+              cleaned_key = cleaned_key:match('^%s*(.-)%s*$') or cleaned_key
+            end
+            local key = tonumber(cleaned_key)
+            if key then
+              OPEN.style_presets[preset_name].vars[key] = v
+            else
+              -- cleaned_key is already a string, use it directly
+              OPEN.style_presets[preset_name].vars[cleaned_key] = v
+            end
           end
           for k, v in pairs(preset_data.colors) do
             OPEN.style_presets[preset_name].colors[tonumber(k)] = v
@@ -6259,6 +6448,11 @@ local function LoadStylePresetsFromFile()
           -- Mark as user preset (loaded from USER file)
           UserPresets[preset_name] = true
         end
+      end
+    else
+      -- Log error if loading failed
+      if not ok then
+        r.ShowConsoleMsg('Error loading style presets USER file: ' .. tostring(data) .. '\n')
       end
     end
   end
@@ -6715,6 +6909,36 @@ local function SettingsWindow()
           for i, v in pairs(p.colors or {}) do
             if OPEN.style_editor.style.colors[i] ~= v then return true end
           end
+        -- Compare vars (excluding TrackColorTintIntensity which is stored in Custom_Style)
+        local current_vars = OPEN.style_editor.style.vars or {}
+        local preset_vars  = p.vars or {}
+        for k, pv in pairs(preset_vars) do
+          if k ~= 'TrackColorTintIntensity' then  -- Skip TrackColorTintIntensity, it's in Custom_Style
+            if current_vars[k] ~= pv then return true end
+          end
+        end
+        for k, cv in pairs(current_vars) do
+          if k ~= 'TrackColorTintIntensity' then  -- Skip TrackColorTintIntensity, it's in Custom_Style
+            local pv = preset_vars[k]
+            if pv == nil and cv ~= nil then
+              return true
+            elseif pv ~= cv then
+              return true
+            end
+          end
+        end
+        
+        -- Compare Custom_Style settings (like TrackColorTintIntensity)
+        local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+        local preset_custom = p.Custom_Style or {}
+        local preset_tint = preset_custom.TrackColorTintIntensity
+        -- If preset has Custom_Style with TrackColorTintIntensity, compare directly
+        if preset_tint ~= nil then
+          if current_tint ~= preset_tint then return true end
+        -- If preset doesn't have it, check if current differs from default (1.0)
+        elseif current_tint ~= 1.0 then
+          return true
+        end
           -- Compare element-specific colors
           local curElems = GetCustomClrPreset()
           if p.element_colors and curElems then
@@ -8075,7 +8299,15 @@ function loop()
       local hide = 0
       local TrkClr = im.ColorConvertNative(r.GetTrackColor(Track))
       TrkClr = ((TrkClr or 0) << 8) | 0x66
-      local TrkClr_Low_Alpha = Change_Clr_A(TrkClr, -0.3)
+      -- Apply track color tint intensity from style editor
+      local tint_intensity = 1.0
+      if OPEN.style_editor and OPEN.style_editor.style and OPEN.style_editor.style.vars then
+        tint_intensity = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+      end
+      -- Directly set alpha based on slider value (0.0 = no tint, 1.0 = full tint)
+      -- Slider value 0 to 1 directly maps to alpha 0 to 1
+      local alpha_value = math.max(0.0, math.min(1.0, tint_intensity))
+      local TrkClr_Low_Alpha = Change_Clr_A(TrkClr, nil, alpha_value)
       
 
 

@@ -2951,6 +2951,10 @@ function Send_Btn(ctx, Track, t, BtnSize)
         -- rowCurH already accounts for delete animation scaling
         local iconSize = rowCurH
         local iconWidth = 15  -- Increased from 13 to prevent right-side cropping
+        -- On Windows, increase width to prevent right-side cropping
+        if OS and OS:match('Win') then
+          iconWidth = 12
+        end
         local baseTint = 0xCCFFFFFF  -- Slightly transparent white for normal state
         local sendIconClicked = im.ImageButton(ctx, '##SendIcon_'..tostring(t)..'_'..i, Img.Send, iconWidth, iconSize, nil, nil, nil, nil, nil, baseTint)
         -- Check if hovered and apply bold effect (brighter tint) and show tooltip
@@ -3945,6 +3949,10 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
       -- rCurH already accounts for delete animation scaling
       local iconSize = rCurH
       local iconWidth = 15  -- Same width as send icon to prevent right-side cropping
+      -- On Windows, increase width to prevent right-side cropping
+      if OS and OS:match('Win') then
+        iconWidth = 12
+      end
       local baseTint = 0xCCFFFFFF  -- Slightly transparent white for normal state
       local recvIconClicked = im.ImageButton(ctx, '##RecvIcon_'..tostring(t)..'_'..i, Img.Recv, iconWidth, iconSize, nil, nil, nil, nil, nil, baseTint)
       -- Check if hovered and apply bold effect (brighter tint) and show tooltip
