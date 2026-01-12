@@ -2140,13 +2140,16 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
               local blockStart = asc[1] and asc[1].orig or 0
               local blockLen = #asc
               local insertionStart
+              r.ShowConsoleMsg(string.format("[DEBUG] Multi FX move: entry. container=%s fx=%s blockLen=%d sameTrack=%s cmdHeld=%s\n", tostring(container), tostring(fx), blockLen, tostring(sameTrack), tostring(cmdHeld)))
               
               -- If dropping into a container, calculate the container insertion index
               if container then
+                r.ShowConsoleMsg(string.format("[DEBUG] Multi FX move: container branch. container=%d fx=%s\n", container or -1, tostring(fx)))
                 -- Find the slot position (0-based) of fx within the container
                 local slotPos = nil
                 local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')
                 local curCnt = tonumber(cntStr) or 0
+                r.ShowConsoleMsg(string.format("[DEBUG] Container move: container=%d, curCnt=%d, fx=%d, draggedOrig=%s\n", container, curCnt, fx or -1, tostring(draggedOrig)))
                 for i = 0, curCnt - 1 do
                   local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
                   if childIdx == fx then
@@ -2154,24 +2157,28 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                     break
                   end
                 end
+                r.ShowConsoleMsg(string.format("[DEBUG] Container move: slotPos=%s\n", tostring(slotPos)))
                 
                 if slotPos ~= nil then
                   -- Calculate insertion start slot position
                   -- When dropping onto slot i (0-based), we want to insert before it, which is position i+1 (1-based)
                   -- But if moving on same track and dragging down, we need to account for the block being moved
                   local isSameContainerMove = false
+                  r.ShowConsoleMsg(string.format("[DEBUG] Container move: slotPos found, sameTrack=%s cmdHeld=%s\n", tostring(sameTrack), tostring(cmdHeld)))
                   if sameTrack and not cmdHeld then
                     -- Moving on same track: check if dragged FX is also in the same container
                     -- draggedOrig might be a container path index (>= 0x2000000) or regular index
                     local draggedSlotPos = nil
                     -- Get the GUID of the dragged FX to compare
                     local draggedGuid = draggedOrig and r.TrackFX_GetFXGUID(Track, draggedOrig) or nil
+                    r.ShowConsoleMsg(string.format("[DEBUG] Container move: sameTrack=%s, cmdHeld=%s, draggedGuid=%s\n", tostring(sameTrack), tostring(cmdHeld), tostring(draggedGuid)))
                     for i = 0, curCnt - 1 do
                       local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
                       -- Compare by index first (fast path), then by GUID if indices don't match
                       if childIdx == draggedOrig then
                         draggedSlotPos = i
                         isSameContainerMove = true
+                        r.ShowConsoleMsg(string.format("[DEBUG] Container move: Found dragged FX by index match: draggedSlotPos=%d, childIdx=%d\n", i, childIdx))
                         break
                       elseif draggedGuid then
                         -- If indices don't match, compare by GUID (handles case where draggedOrig is regular index but childIdx is container path index)
@@ -2179,11 +2186,14 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                         if childGuid == draggedGuid then
                           draggedSlotPos = i
                           isSameContainerMove = true
+                          r.ShowConsoleMsg(string.format("[DEBUG] Container move: Found dragged FX by GUID match: draggedSlotPos=%d, childIdx=%d\n", i, childIdx))
                           break
                         end
                       end
                     end
+                    r.ShowConsoleMsg(string.format("[DEBUG] Container move: isSameContainerMove=%s, draggedSlotPos=%s\n", tostring(isSameContainerMove), tostring(draggedSlotPos)))
                     if isSameContainerMove then
+                      r.ShowConsoleMsg(string.format("[DEBUG] Container move: slotPos=%d, draggedSlotPos=%d, comparison=%s\n", slotPos, draggedSlotPos or -1, tostring(slotPos >= (draggedSlotPos or -1))))
                       if slotPos >= draggedSlotPos then
                         -- Moving down within same container: the source FX will be removed first
                         -- If dragging from slot A to slot B (where B > A), after removal:
@@ -2193,17 +2203,21 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                         --   - We want to insert at position B (after slot B-1, which was originally slot B)
                         -- So insertionStart should be slotPos (the target slot position)
                         insertionStart = slotPos
+                        r.ShowConsoleMsg(string.format("[DEBUG] Container move: MOVING DOWN - insertionStart=%d\n", insertionStart))
                       else
                         -- Moving up within same container: insert at target position (before slotPos)
                         insertionStart = slotPos
+                        r.ShowConsoleMsg(string.format("[DEBUG] Container move: MOVING UP - insertionStart=%d\n", insertionStart))
                       end
                     else
                       -- Not same container: insert at target position (before slotPos)
                       insertionStart = slotPos
+                      r.ShowConsoleMsg(string.format("[DEBUG] Container move: NOT same container - insertionStart=%d\n", insertionStart))
                     end
                   else
                     -- Copying or different track: insert at drop position (before the target slot)
                     insertionStart = slotPos
+                    r.ShowConsoleMsg(string.format("[DEBUG] Container move: Copying or different track - insertionStart=%d\n", insertionStart))
                   end
                   if insertionStart < 0 then insertionStart = 0 end
                   
@@ -2240,15 +2254,19 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                       if slotPos >= draggedSlotPos then
                         -- Moving down: insert after target slot
                         insertPosInside = targetSlot + 2
+                        r.ShowConsoleMsg(string.format("[DEBUG] Container move: MOVING DOWN - rank=%d, targetSlot=%d, insertPosInside=%d\n", rank, targetSlot, insertPosInside))
                       else
                         -- Moving up: insert before target slot
                         insertPosInside = targetSlot + 1
+                        r.ShowConsoleMsg(string.format("[DEBUG] Container move: MOVING UP - rank=%d, targetSlot=%d, insertPosInside=%d\n", rank, targetSlot, insertPosInside))
                       end
                     else
                       -- Copying or moving from outside
                       insertPosInside = targetSlot + 2
+                      r.ShowConsoleMsg(string.format("[DEBUG] Container move: NOT same container - rank=%d, targetSlot=%d, insertPosInside=%d\n", rank, targetSlot, insertPosInside))
                     end
                     local target = Calc_Container_FX_Index and Calc_Container_FX_Index(Track, container, insertPosInside) or targetSlot
+                    r.ShowConsoleMsg(string.format("[DEBUG] Container move: Final values - fromIndex=%d, target=%d, guid=%s\n", fromIndex, target, tostring(it.guid)))
                     table.insert(MovFX.FromPos, fromIndex)
                     table.insert(MovFX.ToPos, target)
                     table.insert(MovFX.FromTrack, DraggingTrack_Data)
@@ -2385,6 +2403,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         end
 
         if not didBatch then
+          r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: entry point. fx=%d container=%s finalContainerHalf=%s beforeOverride=%s DraggingTrack_Data==Track=%s\n", fx or -1, tostring(container), tostring(ContainerHalfTarget), tostring(beforeOverride), tostring(DraggingTrack_Data==Track)))
           -- If dropping into a container, calculate the container insertion index
           local targetIndex = fx
           local sameTrackSingle = (DraggingTrack_Data == Track)
@@ -2394,13 +2413,10 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           local beforeOverride = false
           -- Compute dragged index for final resolution (payload takes priority)
           local dragIdxKnown = tonumber(draggedFX) or (DraggingFX_Index and tonumber(DraggingFX_Index)) or nil
-          -- Resolve half-target using final drop info (dragIdxKnown) so "into" wins for upward drags
+          -- Use explicit half-target only (do not auto-force)
           local finalContainerHalf = ContainerHalfTarget
-          if DraggingTrack_Data == Track and dragIdxKnown and dragIdxKnown < fx then
-            finalContainerHalf = 'into'
-          end
 
-          if finalContainerHalf == 'into' then
+          if finalContainerHalf == 'into' and dragIdxKnown and dragIdxKnown > fx then
             containerTargetOverride = fx
             insertPosOverride = 1
           elseif finalContainerHalf == 'before' then
@@ -2409,18 +2425,23 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             beforeOverride = true
           end
 
+          r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: pre-container branch. container=%s (truthy=%s) containerTargetOverride=%s\n", tostring(container), tostring(not not container), tostring(containerTargetOverride)))
           if containerTargetOverride then
             targetIndex = TrackFX_GetInsertPositionInContainer and TrackFX_GetInsertPositionInContainer(Track, containerTargetOverride, insertPosOverride or 1)
+            r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: containerTargetOverride branch. targetIndex=%s\n", tostring(targetIndex)))
           elseif container then
+            r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: containerTargetOverride nil, entering container calc. container=%d targetIndex(start)=%d\n", container or -1, targetIndex or -1))
             -- IMPORTANT:
             -- Inside containers, `fx` and container_item.N are *container-path indices* (>= 0x2000000).
             -- Do NOT attempt to decode; compare using raw values.
             local actualFxIndex = fx
+            r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: ENTER container branch. container=%d fx=%d draggedFX=%s sameTrackSingle=%s\n", container or -1, actualFxIndex or -1, tostring(draggedFX), tostring(sameTrackSingle)))
 
             -- Find the slot position (0-based) of fx within the container
             local slotPos = nil
             local _, cntStr = r.TrackFX_GetNamedConfigParm(Track, container, 'container_count')
             local curCnt = tonumber(cntStr) or 0
+            r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: container=%d, curCnt=%d, fx=%d, draggedFX=%s\n", container, curCnt, actualFxIndex or -1, tostring(draggedFX)))
             for i = 0, curCnt - 1 do
               local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
               if childIdx == actualFxIndex then
@@ -2428,6 +2449,7 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                 break
               end
             end
+            r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: slotPos=%s\n", tostring(slotPos)))
             
             if slotPos ~= nil and TrackFX_GetInsertPositionInContainer then
               -- Check if dragged FX is also in the same container (same-container move)
@@ -2436,12 +2458,14 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
               if sameTrackSingle and draggedFX then
                 -- Get the GUID of the dragged FX to compare
                 local draggedGuid = r.TrackFX_GetFXGUID(Track, draggedFX)
+                r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: sameTrackSingle=%s, draggedGuid=%s\n", tostring(sameTrackSingle), tostring(draggedGuid)))
                 for i = 0, curCnt - 1 do
                   local childIdx = tonumber(select(2, r.TrackFX_GetNamedConfigParm(Track, container, 'container_item.' .. i)))
                   -- Compare by index first (fast path), then by GUID if indices don't match
                   if childIdx == draggedFX then
                     isSameContainerMove = true
                     draggedSlotPos = i
+                    r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: Found dragged FX by index match: draggedSlotPos=%d, childIdx=%d\n", i, childIdx))
                     break
                   elseif draggedGuid then
                     -- If indices don't match, compare by GUID (handles case where draggedFX is regular index but childIdx is container path index)
@@ -2449,28 +2473,80 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                     if childGuid == draggedGuid then
                       isSameContainerMove = true
                       draggedSlotPos = i
+                      r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: Found dragged FX by GUID match: draggedSlotPos=%d, childIdx=%d\n", i, childIdx))
                       break
                     end
                   end
                 end
               end
+              r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: isSameContainerMove=%s, draggedSlotPos=%s\n", tostring(isSameContainerMove), tostring(draggedSlotPos)))
               
               -- Convert slot position (0-based) to container insertion index (1-based for Calc_Container_FX_Index)
               -- Calc_Container_FX_Index inserts BEFORE the specified position (1-based)
               local insertPosInside
               if isSameContainerMove then
+                r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: slotPos=%d, draggedSlotPos=%d, comparison=%s\n", slotPos, draggedSlotPos or -1, tostring(slotPos >= (draggedSlotPos or -1))))
                 if slotPos >= draggedSlotPos then
                   -- Moving down: insert after target slot (since source will be removed first)
-                  insertPosInside = slotPos + 2
+                  insertPosInside = slotPos 
+                  r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING DOWN - insertPosInside=%d\n", insertPosInside))
                 else
-                  -- Moving up: insert before target slot
+                  -- Moving up (from larger index to smaller index within same container):
+                  -- When moving from slot A to slot B where A > B, we want to insert before slot B.
+                  -- The source at slot A is AFTER slot B, so its removal doesn't affect the insertion position.
+                  -- TrackFX_GetInsertPositionInContainer with position N (1-based) returns a container path index.
+                  -- The issue: when slotPos = 0, using position 1 returns the index of slot 0 itself, causing insertion AT slot 0 instead of BEFORE it.
+                  -- Fix: when moving up, we need to insert BEFORE the target slot. 
+                  -- Since position 1 = before slot 0, we use slotPos + 1. However, if that returns the target slot's index,
+                  -- we need to ensure we're inserting before it. The key is that when moving up, the source removal happens AFTER insertion,
+                  -- so we can use the target position directly. But we need to insert BEFORE the target, not at it.
+                  -- Solution: when moving up, use slotPos (0-based) + 1 to get position (1-based) that inserts before slotPos.
+                  -- This should work, but if it returns the target slot's index, we may need to check and adjust.
                   insertPosInside = slotPos + 1
+                  r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING UP - insertPosInside=%d (slotPos=%d, draggedSlotPos=%d, should insert before slot %d)\n", insertPosInside, slotPos, draggedSlotPos or -1, slotPos))
                 end
               else
                 -- Copying or moving from outside: use slotPos + 2 to account for Calc_Container_FX_Index inserting BEFORE the position
                 insertPosInside = slotPos + 2
+                r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: NOT same container - insertPosInside=%d\n", insertPosInside))
               end
               targetIndex = TrackFX_GetInsertPositionInContainer(Track, container, insertPosInside)
+              r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: Final targetIndex=%d, fx=%d, match=%s, isMovingUp=%s\n", targetIndex or -1, actualFxIndex or -1, tostring(targetIndex == actualFxIndex), tostring(isSameContainerMove and slotPos < (draggedSlotPos or -1))))
+              -- When moving up, if targetIndex equals the target FX index, we're inserting at the target instead of before it.
+              -- This happens when insertPosInside = slotPos + 1 returns the target slot's index.
+              -- Fix: when moving up and targetIndex equals target FX, we need to insert before it.
+              -- IMPORTANT: Only apply this fix when moving UP (slotPos < draggedSlotPos), NOT when moving down.
+              if isSameContainerMove and slotPos < draggedSlotPos and targetIndex == actualFxIndex then
+                r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING UP FIX - targetIndex equals target FX index! Recalculating. insertPosInside=%d, slotPos=%d, draggedSlotPos=%d\n", insertPosInside, slotPos, draggedSlotPos or -1))
+                -- When moving up, if targetIndex equals the target FX index, we're inserting at the target instead of before it.
+                -- Fix: use ComputeInsertBeforeContainer to get the insertion index before the target.
+                local beforeIndex = ComputeInsertBeforeContainer(Track, actualFxIndex)
+                if beforeIndex and beforeIndex ~= actualFxIndex then
+                  targetIndex = beforeIndex
+                  r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: Recalculated targetIndex=%d using ComputeInsertBeforeContainer\n", targetIndex))
+                else
+                  -- Fallback: set beforeOverride to ensure we insert before the target.
+                  beforeOverride = true
+                  r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: ComputeInsertBeforeContainer returned invalid value (%s), using beforeOverride\n", tostring(beforeIndex)))
+                end
+              elseif isSameContainerMove and slotPos >= draggedSlotPos then
+                -- Moving down: verify the calculation is correct
+                r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING DOWN - targetIndex=%d, actualFxIndex=%d, insertPosInside=%d\n", targetIndex or -1, actualFxIndex or -1, insertPosInside))
+                -- If targetIndex ended up before or at the source (off by one), try one slot further
+                if targetIndex and actualFxIndex and targetIndex <= actualFxIndex then
+                  local altPos = insertPosInside + 1
+                  local altTarget = TrackFX_GetInsertPositionInContainer(Track, container, altPos)
+                  r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING DOWN adjust check. altPos=%d altTarget=%s\n", altPos, tostring(altTarget)))
+                  if altTarget and altTarget > targetIndex then
+                    targetIndex = altTarget
+                    r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: MOVING DOWN adjust applied. new targetIndex=%d\n", targetIndex))
+                  end
+                end
+              end
+            elseif slotPos == nil then
+              r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: slotPos NIL inside container. container=%d fx=%d curCnt=%d\n", container or -1, actualFxIndex or -1, curCnt))
+            else
+              r.ShowConsoleMsg(string.format("[DEBUG] Single FX move: TrackFX_GetInsertPositionInContainer missing? container=%d fx=%d\n", container or -1, actualFxIndex or -1))
             end
           end
           
