@@ -294,7 +294,8 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       lineHeight = lineHeight / winUIScale
     end
 
-    local approxSize = lineHeight / 1.5 -- inverse of typical line-height scale
+    local Divide = IS_MAC and 1.25 or 1.5
+    local approxSize = lineHeight / Divide -- inverse of typical line-height scale
     local bestFont = fonts[#fonts][2]
     local bestDiff = math.huge
     for _, entry in ipairs(fonts) do
