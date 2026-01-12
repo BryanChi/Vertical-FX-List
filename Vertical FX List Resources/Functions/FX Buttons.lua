@@ -653,7 +653,9 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
       else
         -- Linked FX exists, display the link icon
         local LN = im.GetTextLineHeight(ctx)
-          LN = LN / (DPI_SCALE or 1) 
+        if not (OS and (OS:find('OSX') or OS:find('macOS'))) then
+          LN = LN / (DPI_SCALE or 1)
+        end 
         
         local linkTint = (Clr and Clr.LinkCable) or 0xffffffff
         if im.ImageButton(ctx, '##Link' .. fxID, Img.Link, LN, LN, nil, nil, nil, nil, nil, linkTint) then

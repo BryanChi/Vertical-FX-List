@@ -4418,7 +4418,8 @@ function Sends_List(ctx, t, HeightOfs, T)
 
 
 
-  if not im.BeginChild(ctx, 'Sends' .. t, Send_W, (Trk[t].H-HeightOfs)/ TRK_H_DIVIDER, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then return end 
+  local sendHeight = (OS and (OS:find('OSX') or OS:find('macOS'))) and (Trk[t].H-HeightOfs) or ((Trk[t].H-HeightOfs) / TRK_H_DIVIDER)
+  if not im.BeginChild(ctx, 'Sends' .. t, Send_W, sendHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then return end 
   do
     local childPosX, childPosY = im.GetWindowPos(ctx)
     local childW, childH = im.GetWindowSize(ctx)

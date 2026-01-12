@@ -13,6 +13,8 @@ local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
+local IS_MAC = OS and (OS:find('OSX') or OS:find('macOS'))
+local IS_WINDOWS = OS and OS:find('Win')
 local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
 local script_path = debug.getinfo(1, 'S').source:match('@?(.*[\\\\/])')
 local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
@@ -4257,6 +4259,14 @@ SendClr1, SendClr2 = Generate_Active_And_Hvr_CLRs(SendClr)
 
 TRK_H_DIVIDER = 1  -- Default for macOS (no scaling)
 -- Windows: Will be set to DPI scale after detection in main loop
+-- Apply divider only on Windows; macOS should stay unscaled
+function ApplyTrackHeightDivider(value)
+  if not value then return value end
+  if IS_WINDOWS then
+    return value / (TRK_H_DIVIDER or 1)
+  end
+  return value
+end
 -- Get DPI scale factor for the arrange window (Windows only)
 -- This accounts for display scaling that affects track coordinate alignment
 -- On Windows with DPI scaling, REAPER's I_TCPY values may be in logical pixels
@@ -4277,6 +4287,12 @@ local function GetImGuiFontScale(ctx_param)
   return 1
 end
 local function getArrangeDPIScale(ctx_param)
+  -- macOS: Always return 1.0, DPI scaling has no effect
+  if IS_MAC then
+    DPI_SCALE = 1.0
+    return DPI_SCALE
+  end
+  
   if DPI_SCALE then
     return DPI_SCALE
   end
@@ -5404,8 +5420,6 @@ end
 -- Persisted per-project in extstate so they survive restarts.
 
 local SHORTCUTS_SECTION = 'FXD_Vertical_FX_List_Shortcuts'
-local OS_NAME = (r and r.GetOS and (r.GetOS() or '')) or ''
-local IS_MAC = OS_NAME:find('OSX') or OS_NAME:find('macOS')
 
 -- Default bindings
 Shortcuts = {
@@ -6183,10 +6197,10 @@ local function SaveStylePresetsToFile()
          lua_file:write(('      ["%s"] = %d'):format(key, v))
        end
        lua_file:write('\n    },\n')
-       -- Custom style settings (like TrackColorTintIntensity)
-       lua_file:write('    Custom_Style = {\n')
-       local custom_style = preset_data.Custom_Style or {}
-       local tint_value = custom_style.TrackColorTintIntensity or 1.0
+      -- Custom style settings (like TrackColorTintIntensity)
+      lua_file:write('    Custom_Style = {\n')
+      local custom_style = preset_data.Custom_Style or {}
+      local tint_value = custom_style.TrackColorTintIntensity or 0.1
        lua_file:write(('      TrackColorTintIntensity = %s'):format(tostring(tint_value)))
        lua_file:write('\n    }\n  }')
      end
@@ -6202,7 +6216,7 @@ local function SaveStylePreset(name)
   
   if OPEN.style_editor then
     -- Get TrackColorTintIntensity from vars or default
-    local tint_value = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+    local tint_value = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 0.1
     
     OPEN.style_presets[name] = {
       vars = {},
@@ -6258,7 +6272,7 @@ local function LoadStylePreset(name)
     else
       -- If preset doesn't have Custom_Style, set default value to match what dirty check expects
       if not OPEN.style_editor.style.vars then OPEN.style_editor.style.vars = {} end
-      OPEN.style_editor.style.vars['TrackColorTintIntensity'] = 1.0
+      OPEN.style_editor.style.vars['TrackColorTintIntensity'] = 0.1
     end
   end
 end
@@ -6294,15 +6308,15 @@ local function IsStyleDirty()
   end
   
   -- Check Custom_Style settings (like TrackColorTintIntensity)
-  local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+  local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 0.1
   local preset_custom = p.Custom_Style or {}
   local preset_tint = preset_custom.TrackColorTintIntensity
   -- If preset has Custom_Style with TrackColorTintIntensity, compare directly
   if preset_tint ~= nil then
     if current_tint ~= preset_tint then return true end
-  -- If preset doesn't have Custom_Style, treat it as having default value (1.0)
+  -- If preset doesn't have Custom_Style, treat it as having default value (0.1)
   -- Only mark dirty if current differs from default
-  elseif current_tint ~= 1.0 then
+  elseif current_tint ~= 0.1 then
     return true
   end
   -- Check element colors
@@ -6929,14 +6943,14 @@ local function SettingsWindow()
         end
         
         -- Compare Custom_Style settings (like TrackColorTintIntensity)
-        local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+        local current_tint = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 0.1
         local preset_custom = p.Custom_Style or {}
         local preset_tint = preset_custom.TrackColorTintIntensity
         -- If preset has Custom_Style with TrackColorTintIntensity, compare directly
         if preset_tint ~= nil then
           if current_tint ~= preset_tint then return true end
-        -- If preset doesn't have it, check if current differs from default (1.0)
-        elseif current_tint ~= 1.0 then
+        -- If preset doesn't have it, check if current differs from default (0.1)
+        elseif current_tint ~= 0.1 then
           return true
         end
           -- Compare element-specific colors
@@ -7469,15 +7483,19 @@ function loop()
   -- advance patch-line animation phase each frame
   PatchLineShift = (PatchLineShift + PatchLineSpeed) % (Patch_Thick * 2)
 
-  Top_Arrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file()))) + 5
-  if OS:match( 'Win') then
-    Top_Arrang = Top_Arrang -5
-  end
+  Top_Arrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file()))) 
+
+
 
   -- Calculate DPI scale for Windows track coordinate alignment fix
   -- Calculate only once (first loop) - DPI_SCALE is cached globally
   -- Pass ctx so Method 1 can use ImGui_GetWindowDpiScale
-  if OS and (OS == 'Win32' or OS == 'Win64') and not DPI_SCALE then
+  -- macOS: DPI_SCALE and TRK_H_DIVIDER have no effect (always 1.0)
+  if IS_MAC then
+    -- macOS: Always set to 1.0, no DPI scaling effects
+    DPI_SCALE = 1.0
+    TRK_H_DIVIDER = 1
+  elseif IS_WINDOWS and not DPI_SCALE then
     getArrangeDPIScale(ctx)
     -- Use detected DPI scale as the track height divider
     if DPI_SCALE and DPI_SCALE > 0 then
@@ -7485,7 +7503,7 @@ function loop()
     else
       TRK_H_DIVIDER = 1  -- Fallback if no scale detected
     end
-  elseif OS and (OS == 'Win32' or OS == 'Win64') and DPI_SCALE then
+  elseif IS_WINDOWS and DPI_SCALE then
     -- Already calculated, just use it
     TRK_H_DIVIDER = DPI_SCALE
   end
@@ -8300,9 +8318,9 @@ function loop()
       local TrkClr = im.ColorConvertNative(r.GetTrackColor(Track))
       TrkClr = ((TrkClr or 0) << 8) | 0x66
       -- Apply track color tint intensity from style editor
-      local tint_intensity = 1.0
+      local tint_intensity = 0.1
       if OPEN.style_editor and OPEN.style_editor.style and OPEN.style_editor.style.vars then
-        tint_intensity = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 1.0
+        tint_intensity = (OPEN.style_editor.style.vars and OPEN.style_editor.style.vars['TrackColorTintIntensity']) or 0.1
       end
       -- Directly set alpha based on slider value (0.0 = no tint, 1.0 = full tint)
       -- Slider value 0 to 1 directly maps to alpha 0 to 1
@@ -8320,7 +8338,8 @@ function loop()
           SettingsWindow()
         end
 
-        im.SetCursorPosY(ctx, Top_Arrang + Trk[t].PosY / TRK_H_DIVIDER - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0))
+        local posY = IS_MAC and Trk[t].PosY or (Trk[t].PosY / TRK_H_DIVIDER)
+        im.SetCursorPosY(ctx, Top_Arrang + posY - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0))
         local masterVisibility = r.GetMasterTrackVisibility()
         if masterVisibility == 2 or masterVisibility == 0 then hide = 0 else hide = 1 end
       else
@@ -8379,6 +8398,10 @@ function loop()
         -- Set cursor position using TCPY relative to first visible TCP (Windows-only change;
         -- macOS kept unaffected since FirstTCPY_ForAlign defaults to 0 and matches prior behaviour)
         local trackCursorY = Top_Arrang + (Trk[t].PosY / TRK_H_DIVIDER - (FirstTCPY_ForAlign or 0) ) - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0)
+        im.SetCursorPosY(ctx, trackCursorY)
+        elseif IS_MAC then
+        -- macOS: No DPI scaling, use raw PosY
+        local trackCursorY = Top_Arrang + (Trk[t].PosY - (FirstTCPY_ForAlign or 0) ) - (MonitorFX_Height or 0) - (Hints_Height_OnTop or 0)
         im.SetCursorPosY(ctx, trackCursorY)
         end
         local x, y = im.GetCursorScreenPos(ctx)
@@ -8718,7 +8741,8 @@ function loop()
           local __prevFXPaneW = FXPane_W
           FXPane_W = fxPaneW
 
-          local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, (Trk[t].H - HeightOfs)/ TRK_H_DIVIDER, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
+          local trackHeight = IS_MAC and (Trk[t].H - HeightOfs) or ((Trk[t].H - HeightOfs) / TRK_H_DIVIDER)
+          local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, trackHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
           if __opened then
             do
               local childPosX, childPosY = im.GetWindowPos(ctx)
