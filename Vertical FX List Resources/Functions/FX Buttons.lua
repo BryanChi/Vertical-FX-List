@@ -2416,10 +2416,20 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
           -- Use explicit half-target only (do not auto-force)
           local finalContainerHalf = ContainerHalfTarget
 
-          if finalContainerHalf == 'into' and dragIdxKnown and dragIdxKnown > fx then
+          -- If dragging to an uncollapsed container from a lower index, drop into first slot
+          -- This handles the case where a collapsed container becomes uncollapsed during drag
+          -- Check if container is currently uncollapsed (regardless of ContainerHalfTarget which may be nil)
+          local isContainerUncollapsed = isContainer and (ContainerCollapsed[fxID] ~= true)
+          if isContainerUncollapsed and dragIdxKnown and sameTrackSingle and dragIdxKnown < fx then
+            containerTargetOverride = fx
+            insertPosOverride = 1
+            msg("SPECIAL 1")
+          elseif finalContainerHalf == 'into' and dragIdxKnown and dragIdxKnown > fx then
+            msg("SPECIAL 2222")
             containerTargetOverride = fx
             insertPosOverride = 1
           elseif finalContainerHalf == 'before' then
+            msg("SPEC 3")
             container = nil -- treat as normal before-hover insertion
             targetIndex = ComputeInsertBeforeContainer(Track, fx) or fx
             beforeOverride = true
