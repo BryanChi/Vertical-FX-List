@@ -8739,7 +8739,7 @@ function loop()
         function FX_List()
 
           local __prevFXPaneW = FXPane_W
-          FXPane_W = fxPaneW
+          FXPane_W = fxPaneW 
 
           local trackHeight = IS_MAC and (Trk[t].H - HeightOfs  ) or ((Trk[t].H - HeightOfs) / TRK_H_DIVIDER)
           local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, trackHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
