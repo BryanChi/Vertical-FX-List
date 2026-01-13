@@ -2092,10 +2092,15 @@ local function PanAllActivePans(ctx, PanningTracks, t ,ACTIVE_PAN_V , PanningTra
   if Pan_Preset_Active then
     local wheel = im.GetMouseWheel(ctx)
     if wheel and wheel ~= 0 then
-      local step = 0.025
+      local step = 0.05
       local inc = (wheel > 0) and step or -step
       PanFalloffCurve = math.max(-2.0, math.min(2.0, (PanFalloffCurve or 0) + inc))
       im.SetMouseCursor(ctx, im.MouseCursor_Hand)
+    end
+    
+    -- Handle 'C' key to clear the curve when preset is active
+    if im.IsKeyPressed(ctx, im.Key_C) then
+      PanFalloffCurve = 0.0
     end
   end
 
@@ -6463,11 +6468,6 @@ local function LoadStylePresetsFromFile()
           UserPresets[preset_name] = true
         end
       end
-    else
-      -- Log error if loading failed
-      if not ok then
-        r.ShowConsoleMsg('Error loading style presets USER file: ' .. tostring(data) .. '\n')
-      end
     end
   end
 end
@@ -8741,7 +8741,7 @@ function loop()
           local __prevFXPaneW = FXPane_W
           FXPane_W = fxPaneW
 
-          local trackHeight = IS_MAC and (Trk[t].H - HeightOfs) or ((Trk[t].H - HeightOfs) / TRK_H_DIVIDER)
+          local trackHeight = IS_MAC and (Trk[t].H - HeightOfs  ) or ((Trk[t].H - HeightOfs) / TRK_H_DIVIDER)
           local __opened = im.BeginChild(ctx, 'Track' .. t, fxPaneW, trackHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse)
           if __opened then
             do
@@ -8755,7 +8755,7 @@ function loop()
                 Trk[TrkID].FxChildH     = childH
               end
             end
-            im.Dummy(ctx, 0, 1) -- top margin inside FX child
+           -- im.Dummy(ctx, 0, 0) -- top margin inside FX child
             --im.Text(ctx, 'track' .. t .. '     ' .. Trk[t].PosY)
             if not WDL then WDL = im.GetWindowDrawList(ctx) end
             --------------------------------------------
@@ -9756,7 +9756,9 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
   end
 
   if im.BeginChild(ctx, 'Snapshots' .. tostring(TrkGUID), SnapshotPane_W, rowHeight, nil, im.WindowFlags_NoScrollbar + im.WindowFlags_NoScrollWithMouse) then
-    im.Dummy(ctx, 0, 1) -- top margin
+    -- Remove gaps between lines
+    im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0)
+    im.Dummy(ctx, 0, 0) -- no top margin
     local indicesToRemove = {}
     for i, snap in ipairs(snaps) do
       im.PushID(ctx, i)
@@ -9791,7 +9793,8 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
         local clicked = im.ImageButton(ctx, '##cap'..tostring(i)..tostring(TrkGUID), Img.Camera, 16, 16, nil,nil,nil,nil, nil, Clr.SnapshotOverlay)
         local cameraHovered = im.IsItemHovered(ctx)
         local cameraL, cameraT = im.GetItemRectMin(ctx)
-        local cameraB = cameraT + 18 -- button height is 18
+        local cameraR, cameraB = im.GetItemRectMax(ctx)
+        local cameraW = cameraR - cameraL  -- Actual button width including padding
         -- Overlay brighter tint on hover/active
         local baseColor = Clr.SnapshotOverlay
         local overlayTint
@@ -9820,19 +9823,24 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
           end
         end
         im.SameLine(ctx, nil, 2)
-        local labelAreaW = SnapshotPane_W - 18
+        local labelAreaW = SnapshotPane_W - cameraW - 2  -- Account for camera button width + spacing (2px)
         -- label editing logic as before
         if snap.editing then
+          -- Preserve camera button position by using consistent frame padding
+          im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 0)
           im.SetNextItemWidth(ctx, labelAreaW)
           im.SetKeyboardFocusHere(ctx)
           WithTypingGuard(function()
             local changed, txt = im.InputText(ctx, '##lbl', snap.label or '', im.InputTextFlags_AutoSelectAll)
             if changed then snap.label = txt; SaveNow = true end
           end)
+          im.PopStyleVar(ctx)
           if im.IsItemDeactivated(ctx) then snap.editing = nil end
         else
           local disp = (snap.label ~= '' and snap.label) or tostring(i)
+          im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 0)
           im.Button(ctx, disp .. '##lbl', labelAreaW, 18)
+          im.PopStyleVar(ctx)
           local textHovered = im.IsItemHovered(ctx)
           
           -- Show red X and overlay covering entire row when Alt+hovering either button
@@ -9894,6 +9902,7 @@ function Snapshots_Pane(ctx, Track, TrkGUID, rowHeight)
       end
     end
 
+    im.PopStyleVar(ctx) -- Pop ItemSpacing
     im.EndChild(ctx)
   end
 end

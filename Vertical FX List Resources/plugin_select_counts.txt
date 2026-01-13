@@ -1,15 +1,15 @@
 VST3: Pro-Q 4 (FabFilter)	55
 VST3: Pro-C 2 (FabFilter)	35
-Container	30
+Container	31
+JS: De-esser [Liteon/deesser]	11
 VST3: Pro-R 2 (FabFilter)	11
-JS: De-esser [Liteon/deesser]	10
 VST3: Pro-L 2 (FabFilter)	8
 VST3: Timeless 3 (FabFilter)	6
 VST3: Fabfilter Pro R	5
 VST3i: Current (Minimal)	5
+VST: FabFilter Volcano 3 (FabFilter)	5
 VST3: FabFilter Pro-Q 2 (FabFilter)	4
 VST3: bloom (oeksound)	4
-VST: FabFilter Volcano 3 (FabFilter)	4
 VST: ValhallaDelay (Valhalla DSP, LLC)	4
 VST3: MDynamicsMBLarge (MeldaProduction)	3
 VST3: kHs Gain (Kilohearts)	3
@@ -17,6 +17,7 @@ AUi: MSoundFactory6out (MeldaProduction)	2
 VST3: Abbey Road Reel ADT Live Mono (Waves)	2
 VST3: Fresh Air (Slate Digital)	2
 VST3: MDynamicsMB (MeldaProduction)	2
+VST3: ValhallaDelay (Valhalla DSP, LLC)	2
 VST3: ValhallaFreqEcho (Valhalla DSP, LLC)	2
 VST3: ValhallaSupermassive (Valhalla DSP, LLC)	2
 VST3: ValhallaVintageVerb (Valhalla DSP, LLC)	2
@@ -40,7 +41,6 @@ VST3: Rift (Minimal)	1
 VST3: Timeless 2 (FabFilter)	1
 VST3: Transit 2 (BABY Audio)	1
 VST3: VELA (Sonic Academy)	1
-VST3: ValhallaDelay (Valhalla DSP, LLC)	1
 VST3: ValhallaSpaceModulator (Valhalla DSP, LLC)	1
 VST3: Volcano 3 (FabFilter)	1
 VST3: kHs Compressor (Kilohearts)	1

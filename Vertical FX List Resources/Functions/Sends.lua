@@ -607,6 +607,9 @@ function OpenDestTrackPopup(ctx, DestTrk, t)
   im.SetNextWindowPos(ctx, x + 2, Top)
   --im.SetNextWindowSize(ctx, FXPane_W + LineAtLeft + LineThick, rectH + LineThick)
   im.PushStyleVar(ctx, im.StyleVar_WindowPadding, LineThick + WinPad, LineThick + WinPad)
+  -- Reduce spacing between lines in popup
+  im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 2)
+  im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 2)
 
   -- Avoid per-frame growth: do NOT use AlwaysAutoResize
   local resize = 0
@@ -810,7 +813,7 @@ function OpenDestTrackPopup(ctx, DestTrk, t)
     OpenDest_SwitchTo_Index = nil
     -- end this popup now; caller frame will reopen on the new track
   end
-  im.PopStyleVar(ctx)
+  im.PopStyleVar(ctx, 3) -- Pop WindowPadding, ItemSpacing, and FramePadding
   
   --im.EndPopup(ctx)
   InTrackPopup = false
@@ -4249,6 +4252,10 @@ function Empty_Send_Btn(ctx, Track, t, T)
   im.PopStyleColor(ctx)
   -- im.SetNextWindowSize(ctx, 120, 180)
   if im.BeginPopup(ctx, 'SendWindow') then
+    -- Reduce spacing between lines in popup
+    im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 2)
+    im.PushStyleVar(ctx, im.StyleVar_FramePadding, 0, 2)
+    
     local rv, ThisTrkName = r.GetTrackName(Track)
     
     if Trk[TrkID].SendFav then
@@ -4273,8 +4280,15 @@ function Empty_Send_Btn(ctx, Track, t, T)
 
     im.Text(ctx, 'Find Tracks:')
     _, AddSend_FILTER = im.InputText(ctx, '##input', AddSend_FILTER, im.InputTextFlags_AutoSelectAll)
-    SendWin_W = im.GetWindowSize(ctx)
-
+    
+    -- Only update window width when popup first appears to prevent feedback loop
+    if im.IsWindowAppearing(ctx) then
+      SendWin_W = im.GetWindowSize(ctx)
+    end
+    -- Use stored width or default if not set (only set default once, not every frame)
+    if not SendWin_W then
+      SendWin_W = 200
+    end
 
     if im.IsWindowAppearing(ctx) then
       for t = 0, TrackCount - 1, 1 do
@@ -4388,7 +4402,8 @@ function Empty_Send_Btn(ctx, Track, t, T)
         im.Button(ctx, TrkName[t] .. '##', SendWin_W - 30)
       end ]]
     end
-    im.PopStyleVar(ctx)
+    im.PopStyleVar(ctx) -- Pop ButtonTextAlign
+    im.PopStyleVar(ctx, 2) -- Pop ItemSpacing and FramePadding
     im.EndPopup(ctx)
   end
   if im.BeginDragDropSource(ctx, im.DragDropFlags_AcceptNoDrawDefaultRect + im.DragDropFlags_SourceNoPreviewTooltip) then
@@ -4473,8 +4488,7 @@ function Sends_List(ctx, t, HeightOfs, T)
       im.DrawList_AddLine(dl, cx + sz*0.5, cy - sz*0.5, cx - sz*0.5, cy + sz*0.5, xCol, thick)
     end
   end
-  -- top margin inside Sends child
-  im.Dummy(ctx, 0, 1)
+  
   im.PushFont(ctx,Arial_11) -- Font for Sends and Receives 
   Do_Pan_Faders_If_In_MIX_MODE (ctx, Track, t)
   
