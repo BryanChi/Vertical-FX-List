@@ -4876,6 +4876,7 @@ function attachImages()
     Folder   = im.CreateImage(imageFolder .. 'folder.png'),
     FolderOpen = im.CreateImage(imageFolder .. 'folder_open.png'),
     Settings = im.CreateImage(imageFolder .. 'settings.png'),
+    Update = im.CreateImage(imageFolder .. 'update.png'),
   }
   -- Validate Settings image was created successfully
   if not Img.Settings then
@@ -7508,6 +7509,11 @@ function loop()
     return -- Exit script by not calling r.defer(loop)
   end
 
+  -- Auto-check for updates on startup (once per session)
+  if AutoCheckForUpdates then
+    AutoCheckForUpdates()
+  end
+
   _0x8f9a = _0x8f9a + 1
   if _0x8f9a >= _0x9b0c then
     _0x8f9a = 0
@@ -7695,6 +7701,37 @@ function loop()
     im.PopStyleColor(ctx, 5) -- Pop all 5 colors: ButtonActive, ButtonHovered, Button, HeaderActive, HeaderHovered
    if OPEN.Settings then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline)end 
     
+    -- Update icon (show if update available)
+    if UpdateState and UpdateState.show_update_icon then
+      im.SameLine(ctx)
+      -- Use accent color for update icon tint
+      local accentColor = Clr.SelectionOutline or 0x289F81FF
+      im.PushStyleColor(ctx, im.Col_Button, 0x00000000) -- Transparent base
+      im.PushStyleColor(ctx, im.Col_ButtonHovered, 0xffffff11)
+      im.PushStyleColor(ctx, im.Col_ButtonActive, 0xffffff08)
+      if Img and Img.Update then
+        -- ImageButton: ctx, id, image, width, height, uv0, uv1, frame_padding, bg_color, tint_color
+        if im.ImageButton(ctx, 'update icon', Img.Update, 16, 16, nil, nil, nil, nil, nil, accentColor) then
+          -- Open Settings and switch to Updates tab (index 2)
+          OPEN.Settings = true
+          OPEN.settings_tab = 2 -- Updates tab index
+          SaveOpenState()
+        end
+      else
+        -- Fallback to text button if image not available
+        im.PushStyleColor(ctx, im.Col_Text, accentColor)
+        if im.Button(ctx, 'Update') then
+          OPEN.Settings = true
+          OPEN.settings_tab = 2
+          SaveOpenState()
+        end
+        im.PopStyleColor(ctx)
+      end
+      im.PopStyleColor(ctx, 3) -- Pop ButtonActive, ButtonHovered, Button
+      if OPEN.Settings and OPEN.settings_tab == 2 then
+        HighlightItem(Clr.GenericHighlightFill, nil, Clr.GenericHighlightOutline)
+      end
+    end
 
     im.EndMenuBar(ctx)
   end

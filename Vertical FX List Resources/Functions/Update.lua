@@ -11,8 +11,8 @@ local UPDATE_REPO = {
     branch = "main"
 }
 
--- Update state
-local UpdateState = {
+-- Update state (make it accessible globally)
+UpdateState = UpdateState or {
     checking = false,
     downloading = false,
     progress = 0.0,
@@ -23,7 +23,9 @@ local UpdateState = {
     selected_release_tag = nil, -- User-selected release from dropdown
     releases = {}, -- List of all releases
     update_available = false,
-    files_to_update = {}
+    files_to_update = {},
+    auto_checked = false, -- Track if auto-check has been done on startup
+    show_update_icon = false -- Whether to show update icon in menu bar
 }
 
 -- ============================================================================
@@ -299,15 +301,19 @@ local FILES_TO_UPDATE = {
 -- UPDATE FUNCTIONS
 -- ============================================================================
 
--- Check for updates
-function CheckForUpdates()
+-- Check for updates (silent mode for auto-check, show_status for manual check)
+function CheckForUpdates(show_status)
     if UpdateState.checking or UpdateState.downloading then
         return
     end
     
     UpdateState.checking = true
     UpdateState.error_message = ""
-    UpdateState.status_message = "Checking for updates..."
+    if show_status then
+        UpdateState.status_message = "Checking for updates..."
+    else
+        UpdateState.status_message = ""
+    end
     UpdateState.progress = 0.0
     
     -- Get current release tag from version.txt
@@ -317,8 +323,11 @@ function CheckForUpdates()
     local releases, error_msg = FetchReleases()
     if not releases then
         UpdateState.checking = false
-        UpdateState.error_message = error_msg or "Failed to check for updates"
+        if show_status then
+            UpdateState.error_message = error_msg or "Failed to check for updates"
+        end
         UpdateState.status_message = ""
+        UpdateState.show_update_icon = false
         return
     end
     
@@ -336,13 +345,32 @@ function CheckForUpdates()
     -- Check if update is available
     if UpdateState.current_release_tag and UpdateState.current_release_tag == UpdateState.latest_release_tag then
         UpdateState.update_available = false
-        UpdateState.status_message = string.format("You are up to date! (Version: %s)", UpdateState.latest_release_tag)
+        UpdateState.show_update_icon = false
+        if show_status then
+            UpdateState.status_message = string.format("You are up to date! (Version: %s)", UpdateState.latest_release_tag)
+        end
     else
         UpdateState.update_available = true
-        UpdateState.status_message = string.format("Update available! Latest release: %s", UpdateState.latest_release_tag)
+        UpdateState.show_update_icon = true -- Show update icon in menu bar
+        if show_status then
+            UpdateState.status_message = string.format("Update available! Latest release: %s", UpdateState.latest_release_tag)
+        end
     end
     
     UpdateState.checking = false
+    UpdateState.auto_checked = true
+end
+
+-- Auto-check for updates on startup (called once per session)
+-- Make it globally accessible
+AutoCheckForUpdates = function()
+    if UpdateState.auto_checked then
+        return -- Already checked this session
+    end
+    
+    -- Always check for updates, even if version is unknown
+    -- This allows users to see if there's a newer version available
+    CheckForUpdates(false) -- Silent check, no status messages
 end
 
 -- Download and update files
@@ -528,7 +556,7 @@ function DrawUpdateSettingsTab(ctx)
     -- Check for updates button
     im.PushItemWidth(ctx, button_width)
     if im.Button(ctx, "Check for Updates") then
-        CheckForUpdates()
+        CheckForUpdates(true) -- Show status messages
     end
     im.PopItemWidth(ctx)
     
