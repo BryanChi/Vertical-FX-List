@@ -5168,6 +5168,10 @@ end
   local angle_cos, angle_sin = math.cos(angle), math.sin(angle)
   local radius_inner = radius_outer * 0.40
 
+  -- Check if FX is bypassed
+  local fxEnabled = r.TrackFX_GetEnabled(Track, FX_Idx)
+  local isBypassed = not fxEnabled
+
   local circleClr = getClr(im.Col_FrameBgHovered)
   if p_value == 1 then
     circleClr = getClr(im.Col_TextDisabled)
@@ -5179,12 +5183,23 @@ end
   if envHasData then
     circleClr = Clr.Attention
   end
+  
+  -- Dim circle color if FX is bypassed
+  if isBypassed then
+    local r, g, b, a = im.ColorConvertU32ToDouble4(circleClr)
+    circleClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+  end
 
 
   if is_active then
     --r.JS_Mouse_SetPosition(integer x, integer y)
 
     lineClr = (isOffline and 0xdd4444ff) or im.GetColor(ctx, im.Col_SliderGrabActive)
+    -- Dim line color if FX is bypassed
+    if isBypassed and not isOffline then
+      local r, g, b, a = im.ColorConvertU32ToDouble4(lineClr)
+      lineClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+    end
     value_changed = true
     ActiveAny = true
     local delta = (p_value or 0) - (prev_value or 0)
@@ -5199,6 +5214,11 @@ end
     im.SetMouseCursor(ctx, im.MouseCursor_None)
   else
     lineClr = (isOffline and 0xdd4444ff) or circleClr
+    -- Dim line color if FX is bypassed (already dimmed via circleClr, but ensure consistency)
+    if isBypassed and not isOffline then
+      local r, g, b, a = im.ColorConvertU32ToDouble4(lineClr)
+      lineClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+    end
   end
 
   -- Ensure marquee selection is preserved while interacting with the knob of a selected FX
@@ -5215,24 +5235,48 @@ end
 
   if DeltaP_V ~= 1 then
     local fillClr = isOffline and 0x771111ff or im.GetColor(ctx, im.Col_Button)
+    -- Dim fill color if FX is bypassed
+    if isBypassed and not isOffline then
+      local r, g, b, a = im.ColorConvertU32ToDouble4(fillClr)
+      fillClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+    end
     r.ImGui_DrawList_AddCircleFilled(draw_list, center[1], center[2], radius_outer, fillClr)
     local borderClr = isOffline and 0xdd4444ff or circleClr
+    -- borderClr already dimmed via circleClr if bypassed, no need to dim again
     im.DrawList_AddCircle(draw_list, center[1], center[2], radius_outer, borderClr)
     im.DrawList_AddLine(draw_list, center[1], center[2], center[1] + angle_cos * (radius_outer - 2),
       center[2] + angle_sin * (radius_outer - 2), lineClr, 2.0)
+    local labelTextClr = im.GetColor(ctx, im.Col_Text)
+    -- Dim label text color if FX is bypassed
+    if isBypassed then
+      local r, g, b, a = im.ColorConvertU32ToDouble4(labelTextClr)
+      labelTextClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+    end
     im.DrawList_AddText(draw_list, pos[1], pos[2] + radius_outer * 2 + item_inner_spacing[2],
-      im.GetColor(ctx, im.Col_Text), labeltoShow)
+      labelTextClr, labeltoShow)
   else
       local radius_outer = radius_outer
+      local triangleClr = 0x999900ff
+      -- Dim triangle color if FX is bypassed
+      if isBypassed then
+        local r, g, b, a = im.ColorConvertU32ToDouble4(triangleClr)
+        triangleClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+      end
       im.DrawList_AddTriangleFilled(draw_list, center[1] - radius_outer, center[2] + radius_outer, center[1],
-          center[2] - radius_outer, center[1] + radius_outer, center[2] + radius_outer, 0x999900ff)
+          center[2] - radius_outer, center[1] + radius_outer, center[2] + radius_outer, triangleClr)
       -- Calculate text size to center the "S" properly
       local text_size = { im.CalcTextSize(ctx, 'S') }
       local text_width = text_size[1]
       local text_height = text_size[2]
       -- Center the text horizontally and vertically within the triangle (slightly lower for visual balance)
+      local textClr = 0xffffffff
+      -- Dim text color if FX is bypassed
+      if isBypassed then
+        local r, g, b, a = im.ColorConvertU32ToDouble4(textClr)
+        textClr = im.ColorConvertDouble4ToU32(r, g, b, 0.4)  -- Set alpha to 0.4 for dimming
+      end
       im.DrawList_AddText(draw_list, center[1] - text_width / 2, center[2] - text_height / 2 + 1,
-          0xffffffff, 'S')
+          textClr, 'S')
   end
   
 

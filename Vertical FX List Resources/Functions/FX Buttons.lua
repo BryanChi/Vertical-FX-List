@@ -923,8 +923,17 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
         else
           tint = 0x999999ff  -- gray when hidden
         end
+        
+        -- Dim button background color if FX is bypassed (match the dimming effect of bypassed FX button)
+        local fxEnabled = r.TrackFX_GetEnabled(Track, fx)
+        local bgColor = nil  -- Default: use style's button color
+        if not fxEnabled then
+          -- Get current button color and blend with black to match bypassed FX button overlay (0x000000aa = ~67% opacity)
+          local buttonClr = im.GetColor(ctx, im.Col_Button)
+          bgColor = BlendColors(buttonClr, 0x000000ff, 0.67)  -- Blend with black at 67% to match overlay effect
+        end
 
-        if im.ImageButton(ctx, '##Auto'..t..fx, Img.Graph, iconSz, iconSz, nil, nil, nil, nil, nil, tint) then
+        if im.ImageButton(ctx, '##Auto'..t..fx, Img.Graph, iconSz, iconSz, nil, nil, nil, nil, bgColor, tint) then
           if Mods == Alt then
             -- Alt+click: Delete all FX envelopes using actions
             r.Undo_BeginBlock()

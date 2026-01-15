@@ -1404,6 +1404,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
   for i = 0, NumSends-1, 1 do
     local BtnSizeOffset = 0
     local AutoIconW = 0
+    local shouldDrawSendIconRight = false  -- Initialize to false, will be set to true only if no channel badge
     local rv, SendName  = r.GetTrackSendName(Track, i)
     local DestTrkObj = r.GetTrackSendInfo_Value(Track, 0, i, 'P_DESTTRACK')
     local Dest_Valid = DestTrkObj and r.ValidatePtr2(0, DestTrkObj, 'MediaTrack*')
@@ -1568,6 +1569,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
     -- show indication if sending FROM channel that's not 1-2 (at leftmost position, before hide icon and send name)
     local SrcChan = r.GetTrackSendInfo_Value(Track, 0, i, 'I_SRCCHAN')
     if SrcChan > 0 then 
+      im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0)
       local CurX, CurY = im.GetCursorScreenPos(ctx)
       local str = ' '..math.ceil(SrcChan+1)..'-'..math.ceil(SrcChan+2)..' '
       local w ,h = im.CalcTextSize(ctx, str)
@@ -1590,6 +1592,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
       im.DrawList_AddRect(WDL, BadgeX, BadgeY, BadgeX + w, BadgeY + h, badgeText)
       BtnSizeOffset = BtnSizeOffset - totalWidth
       SL()
+      im.PopStyleVar(ctx)
     end
 
     -- if Send Destination Track is hidden (skip while animating deletion and while hover is blocked)
@@ -1605,6 +1608,10 @@ function Send_Btn(ctx, Track, t, BtnSize)
       end
       SL()
       BtnSizeOffset = -HideBtnSz
+      -- Shift cursor position to the left so everything after the hide icon is offset
+      local hideIconOffset = HideBtnSz 
+      local currentX, currentY = im.GetCursorScreenPos(ctx)
+      im.SetCursorScreenPos(ctx, currentX - hideIconOffset, currentY)
     end
 
     -- if hovering send, show Hide Track icon (skip while animating deletion and while hover is blocked)
@@ -1619,6 +1626,10 @@ function Send_Btn(ctx, Track, t, BtnSize)
         SetHelpHint('LMB = Hide Track')
       end
       SL(nil, 0)
+      -- Shift cursor position to the left so everything after the hide icon is offset
+      local hideIconOffset = HideBtnSz / 2
+      local currentX, currentY = im.GetCursorScreenPos(ctx)
+      im.SetCursorScreenPos(ctx, currentX - hideIconOffset, currentY)
     end
     -- if hovering send, show solo icon (skip while animating deletion and while hover is blocked)
     if HoverSend == i .. TrkID and not AnySendAnimActive and not HoverBlocked and Mods ~= Alt and not (rowDeleteAnim and (rowDeleteAnim.progress or 0) < 1) then
@@ -1629,11 +1640,13 @@ function Send_Btn(ctx, Track, t, BtnSize)
         im.PushStyleColor(ctx, im.Col_ButtonHovered, 0x00000000)
         im.PushStyleColor(ctx, im.Col_ButtonActive, 0x00000000)
       end
-      -- On Windows, match solo button height to line height
-      local soloBtnH = 14
+      -- Match solo button height to line height
+      local lineH = im.GetTextLineHeight(ctx)
+      local soloBtnH = (SendsLineHeight or lineH or 14) +2
       if OS and OS:match('Win') then
         soloBtnH = 16
       end
+
       if im.Button(ctx, 'S', 14, soloBtnH) then -- Solo Button
         if Mods == 0 then
           if Dest_Valid then ToggleSolo(DestTrk) end
@@ -2205,7 +2218,13 @@ function Send_Btn(ctx, Track, t, BtnSize)
       --MyText(' '..math.ceil(Chan+1)..'-'..math.ceil(Chan+2)..'  ')
       local str = ' '..math.ceil(Chan+1)..'-'..math.ceil(Chan+2)..' '
       local w ,h = im.CalcTextSize(ctx, str)
-      local CurX = CurX - panKnobOffset  -- Offset by pan knob width
+      -- Calculate send icon width to offset everything (including badge) to the left when badge is present
+      local sendIconWidth = 15  -- Match the send icon width used later
+      if OS and OS:match('Win') then
+        sendIconWidth = 12
+      end
+      local badgeOffset = sendIconWidth /2  -- Add small padding for spacing
+      local CurX = CurX - panKnobOffset - badgeOffset  -- Offset by pan knob width and badge offset
       local CurY=CurY+1
       -- Use animated height for badge
       local badgeH = h
@@ -2214,7 +2233,7 @@ function Send_Btn(ctx, Track, t, BtnSize)
         local scale = 1 - (effective_p * effective_p * effective_p)
         badgeH = math.max(0.0001, h * scale)
       end
-      local badgeX = CurX - 5  -- Move badge 5px to the left to prevent overlap with volume readout
+      local badgeX = CurX   -- Position badge at current cursor position
       -- Use darker colors if send is disabled
       local badgeBg = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeBg, 0.5) or Clr.ChanBadgeBg) or Clr.ChanBadgeBg
       local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
@@ -2223,6 +2242,11 @@ function Send_Btn(ctx, Track, t, BtnSize)
       im.DrawList_AddRect(WDL, badgeX  , CurY, badgeX + w , CurY + badgeH, badgeText)
       BtnSizeOffset = BtnSizeOffset - w
       SL()
+      -- Shift cursor position to the left so everything after the badge is offset
+      local currentX, currentY = im.GetCursorScreenPos(ctx)
+      im.SetCursorScreenPos(ctx, currentX - badgeOffset, currentY)
+      -- Still draw send icon when badge is present, but everything is offset to the left
+      shouldDrawSendIconRight = true
     else
       -- Always draw icon/FX button at rightmost position (send icon if no container, FX button if container exists)
       shouldDrawSendIconRight = true
@@ -3362,13 +3386,25 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
   Draw_Patch_Lines_SENDS()
   -- show indication if receives are not on channel 1 and 2 
   local Chan = r.GetTrackSendInfo_Value(Track, -1, i, 'I_DSTCHAN')
+  local badgeOffset = 0  -- Track badge offset for cumulative offset calculation
   if Chan > 0 then 
-    im.Button(ctx,' '..math.ceil(Chan+1)..'-'..math.ceil(Chan+2)..' ')
+    -- Calculate receive icon width to offset everything (including badge) to the left when badge is present
+    local recvIconWidth = 15  -- Match the receive icon width used later
+    if OS and OS:match('Win') then
+      recvIconWidth = 12
+    end
+    badgeOffset = recvIconWidth / 2  -- Match the offset used for sends
+    im.PushStyleVar(ctx, im.StyleVar_FramePadding, 2, 0)
+    im.Button(ctx, math.ceil(Chan+1)..'-'..math.ceil(Chan+2))
+    im.PopStyleVar(ctx)
     -- Use darker colors if receive is disabled
     local badgeText = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeText, 0.5) or Clr.ChanBadgeText) or Clr.ChanBadgeText
     local w, h = HighlightItem(0x00000000,WDL, badgeText)
     BtnSizeOffset = BtnSizeOffset - w
     SL()
+    -- Shift cursor position to the left so everything after the badge is offset
+    local currentX, currentY = im.GetCursorScreenPos(ctx)
+    im.SetCursorScreenPos(ctx, currentX - badgeOffset, currentY)
   end
   -- if Source Track is hidden (suppress during animation and hover-block)
   if SrcTrack and  r.ValidatePtr2(0, SrcTrack, 'MediaTrack*') then 
@@ -3384,6 +3420,12 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
       end
       SL(nil, 0)
       BtnSizeOffset = -HideBtnSz
+      -- Shift cursor position to the left so everything after the hide icon is offset
+      -- Add badge offset if badge was present (cumulative offset)
+      local hideIconOffset = HideBtnSz 
+      local totalOffset = hideIconOffset + badgeOffset   -- Cumulative offset when both are present
+      local currentX, currentY = im.GetCursorScreenPos(ctx)
+      im.SetCursorScreenPos(ctx, currentX - totalOffset, currentY)
     end
   end
   volume = r.GetTrackSendInfo_Value(Track, -1, i, 'D_VOL')
@@ -3402,6 +3444,12 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
       end
       SL(nil, 0)
       BtnSizeOffset =BtnSizeOffset -HideBtnSz
+      -- Shift cursor position to the left so everything after the unhide icon is offset
+      -- Add badge offset if badge was present (cumulative offset when both badge and unhide icon are present)
+      local hideIconOffset = (HideBtnSz or 12) / 2  -- Ensure HideBtnSz is defined, default to 12 if nil
+      local totalOffset = hideIconOffset + badgeOffset  -- Cumulative offset when both are present
+      local currentX, currentY = im.GetCursorScreenPos(ctx)
+      im.SetCursorScreenPos(ctx, currentX - totalOffset/2, currentY)
     end
   end
 
@@ -3930,8 +3978,6 @@ function ReceiveBtn(ctx, Track, t, i, BtnSize)
           local effective_p = math.max(0, (p - 0.25) / 0.75)
           local scale = 1 - (effective_p * effective_p * effective_p)
           badgeH = math.max(0.0001, h * scale)
-        else
-          badgeH = math.min(h, rCurH)  -- Use smaller of text height or row height
         end
         -- Use darker colors if receive is disabled
         local badgeBg = (Bypass == 1) and (DarkenColorU32 and DarkenColorU32(Clr.ChanBadgeBg, 0.5) or Clr.ChanBadgeBg) or Clr.ChanBadgeBg

@@ -790,7 +790,9 @@ function IconBtn(w, h, icon, BGClr, center, Identifier) -- Y = wrench
     r.ImGui_PopFont(ctx)
     if r.ImGui_IsItemActivated(ctx) then return true end
 end
-
+function msg(str)
+    r.ShowConsoleMsg(str)
+end
 function getClr(f)
     return r.ImGui_GetStyleColor(ctx, f)
 end
