@@ -1,6 +1,5 @@
 -- @name FXD - Vertical FX List
 -- @author Bryan Chi
--- @version 1.0
 -- @about Vertical FX List - A comprehensive vertical FX chain interface for REAPER, visit www.coolreaperscripts.com for details
 -- @provides
 --   [main] FXD_Vertical FX list.lua
@@ -17,6 +16,8 @@ IS_MAC = OS and (OS:find('OSX') or OS:find('macOS'))
 local IS_WINDOWS = OS and OS:find('Win')
 local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
 local script_path = debug.getinfo(1, 'S').source:match('@?(.*[\\\\/])')
+-- Make script_path globally accessible for Update.lua
+_script_path = script_path
 local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 
 dofile(FunctionFolder .. 'General Functions.Lua')
@@ -395,6 +396,7 @@ local OPEN_KEY     = 'OPEN'
 local function_folder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 dofile(function_folder..'FX Buttons.lua')
 dofile(function_folder..'Sends.lua')
+dofile(function_folder..'Update.lua')
 
 
 
@@ -6763,6 +6765,16 @@ local function SettingsWindow()
         im.EndTabItem(ctx)
       end
       
+      -- Updates Tab
+      if im.BeginTabItem(ctx, 'Updates') then
+        if DrawUpdateSettingsTab then
+          DrawUpdateSettingsTab(ctx)
+        else
+          im.Text(ctx, "Update functionality not available")
+        end
+        im.EndTabItem(ctx)
+      end
+      
       -- Keyboard Shortcuts Tab
       if im.BeginTabItem(ctx, 'Keyboard Shortcuts') then
         im.Text(ctx,'Click a button, then press the new key combination')
@@ -7638,6 +7650,7 @@ function loop()
     end
     if (OPEN.ShowSends ~= false) then HighlightItem(Clr.GenericHighlightFill,nil, Clr.GenericHighlightOutline) end
     
+    --[[
     if im.MenuItem(ctx, 'Snapshots') then
       -- Cycle through 3 states: 0=hidden, 1=show tracks with snapshots, 2=show all tracks
       OPEN.Snapshots = ((OPEN.Snapshots or 0) + 1) % 3
@@ -7654,6 +7667,7 @@ function loop()
         HighlightItem(dimFill, nil, dimOutline)
       end
     end
+    --]]
     
     if im.MenuItem(ctx, 'Hints') then
       OPEN.Hints = not (OPEN.Hints == true)
