@@ -13,6 +13,7 @@ local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
+
 IS_MAC = OS and (OS:find('OSX') or OS:find('macOS'))
 local IS_WINDOWS = OS and OS:find('Win')
 local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
@@ -22,6 +23,17 @@ _script_path = script_path
 local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 
 dofile(FunctionFolder .. 'General Functions.Lua')
+
+local SWS_URL = "https://sws-extension.org"
+local SWS_AVAILABLE = r.APIExists and r.APIExists("BR_Win32_GetPrivateProfileString") or false
+if not SWS_AVAILABLE then
+  r.ShowMessageBox(
+    "SWS extension not detected.\n\nThis script uses SWS functions (e.g. BR_*).\nDownload and install from:\n" .. SWS_URL,
+    "Vertical FX List - Missing SWS",
+    0
+  )
+end
+
 --[[ arrange_hwnd  = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 0x3E8) -- client position
 
 _, Top_Arrang = reaper.JS_Window_ClientToScreen(arrange_hwnd, 0, 0)         -- convert to screen position (where clients x,y is actually on the screen)
@@ -7474,7 +7486,7 @@ function loop()
   PatchLineShift = (PatchLineShift + PatchLineSpeed) % (Patch_Thick * 2)
 
   Top_Arrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file()))) 
-
+  Top_Arrang = Top_Arrang or 0
 
 
   -- Calculate DPI scale for Windows track coordinate alignment fix
