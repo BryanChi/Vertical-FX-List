@@ -7,6 +7,7 @@
 --   [nomain] fx_favorites.txt
 --   [nomain] Vertical FX List Resources/**
 
+--VERSION 1.02
 
 local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
