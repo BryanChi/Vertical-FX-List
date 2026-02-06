@@ -921,100 +921,21 @@ local function VerifyLicense(licenseKey)
       local responsePreview = response:sub(1, 200)
       errorMsg = 'Verification failed. Server response: ' .. responsePreview
     end
-    
-    -- Check if verification failed because device is not activated
-    -- If so, try to activate the device and retry verification once
-    if errorMsg and (errorMsg:match('Device not activated') or errorMsg:match('device not activated') or errorMsg:match('not activated for this')) then
-      
-      -- Email is optional - backend should look it up from license key if not provided
-      -- Store email from response if available (for future use), but don't require it for activation
-      if email and email ~= '' then
-        LicenseState.email = email
-        SaveLicenseState()
-      end
-      
-      -- Try to activate the device (email is optional - backend will look it up from license key)
-      local activateSuccess, activateMsg = ActivateDevice(key, LicenseState.deviceId, email or LicenseState.email)
-      
-      if activateSuccess then
-        
-        -- Retry verification after successful activation
-        -- Build the verification request again
-        local retryPayload = string.format('{"licenseKey":"%s","deviceId":"%s"}', 
-          escapeJson(key), 
-          escapeJson(LicenseState.deviceId))
-        local retryCmd = BuildLicenseCurl(retryPayload)
-        
-        LicenseState.checking = true
-        local retryResponse = nil
-        local retryHandle = io.popen(retryCmd, 'r')
-        if retryHandle then
-          local retryLines = {}
-          for line in retryHandle:lines() do
-            table.insert(retryLines, line)
-          end
-          retryResponse = table.concat(retryLines, '\n')
-          retryHandle:close()
-        else
-          retryResponse = r.ExecProcess(retryCmd, 10000)
-        end
-        LicenseState.checking = false
-        
-        -- Parse retry response
-        if retryResponse and retryResponse ~= '' then
-          local retryOk = retryResponse:match('"ok"%s*:%s*true') ~= nil or 
-                         retryResponse:match('"ok"%s*:%s*True') ~= nil or
-                         retryResponse:match('"success"%s*:%s*true') ~= nil or
-                         retryResponse:match('"success"%s*:%s*True') ~= nil
-          
-          local retryStatus = retryResponse:match('"status"%s*:%s*"([^"]+)"')
-          local retryExpiresAtStr = retryResponse:match('"expiresAt"%s*:%s*([^,}]+)')
-          local retryExpiresAt = nil
-          if retryExpiresAtStr then
-            retryExpiresAtStr = retryExpiresAtStr:match('^%s*(.-)%s*$')
-            if retryExpiresAtStr ~= 'null' and retryExpiresAtStr ~= 'nil' then
-              retryExpiresAt = tonumber(retryExpiresAtStr)
-            end
-          end
-          local retryReason = retryResponse:match('"reason"%s*:%s*"([^"]+)"') or 
-                             retryResponse:match('"message"%s*:%s*"([^"]+)"') or
-                             retryResponse:match('"error"%s*:%s*"([^"]+)"')
-          local retryReturnedKey = retryResponse:match('"licenseKey"%s*:%s*"([^"]+)"')
-          local retryEmail = retryResponse:match('"email"%s*:%s*"([^"]+)"')
-          local retryActivations = retryResponse:match('"activations"%s*:%s*(%d+)') or
-                                   retryResponse:match('"activeDevices"%s*:%s*(%d+)') or
-                                   retryResponse:match('"deviceCount"%s*:%s*(%d+)')
-          if retryActivations then retryActivations = tonumber(retryActivations) end
-          
-          if retryOk then
-            -- Retry succeeded, use retry response
-            ok = retryOk
-            status = retryStatus
-            expiresAt = retryExpiresAt
-            reason = retryReason
-            returnedKey = retryReturnedKey or returnedKey
-            email = retryEmail or email
-            activations = retryActivations or activations
-            response = retryResponse
-            -- Continue with normal success flow below
-          else
-            -- Retry also failed
-            local retryErrorMsg = retryReason or 'Verification failed after device activation'
-            SetLicenseResult('inactive', retryExpiresAt, retryErrorMsg, retryReturnedKey or key, retryActivations)
-            return false, retryErrorMsg
-          end
-        else
-          -- No response on retry
-          SetLicenseResult('inactive', expiresAt, 'No response from server after device activation', returnedKey or key, activations)
-          return false, 'No response from server after device activation'
-        end
-        else
-        -- Device activation failed
-        SetLicenseResult('inactive', expiresAt, errorMsg .. ' (Device activation also failed: ' .. (activateMsg or 'Unknown error') .. ')', returnedKey or key, activations)
-        return false, errorMsg .. ' (Device activation failed: ' .. (activateMsg or 'Unknown error') .. ')'
-      end
+
+    -- Ignore device-activation errors for trial verification
+    local lowerError = errorMsg and errorMsg:lower() or nil
+    local deviceNotActivated = false
+    if lowerError then
+      deviceNotActivated = (lowerError:find('device') and lowerError:find('not activated')) or
+                           lowerError:find('not activated for this')
+    end
+    if deviceNotActivated then
+      -- Treat activation-related errors as verified (trial/active)
+      local statusOverride = (lowerError and lowerError:find('trial')) and 'trial' or 'active'
+      status = statusOverride
+      reason = nil
+      ok = true
     else
-      -- Verification failed for other reasons (not device activation)
       SetLicenseResult('inactive', expiresAt, errorMsg, returnedKey or key, activations)
       return false, errorMsg
     end
@@ -1032,22 +953,6 @@ local function VerifyLicense(licenseKey)
   end
   
   SetLicenseResult(status, expiresAt, reason, returnedKey or key, activations)
-  
-  -- Activate device for tracking (only if verification was successful)
-  -- Email is optional - backend will look it up from license key if not provided
-  if status == 'active' or status == 'trial' then
-    local activateSuccess, activateMsg = ActivateDevice(returnedKey or key, LicenseState.deviceId, LicenseState.email)
-    if not activateSuccess then
-      -- If device activation fails due to 3-device limit, show warning but don't fail license verification
-      if activateMsg and activateMsg:match('maximum of 3 active devices') then
-        -- Store the error but don't block license usage
-        LicenseState.reason = 'License verified, but device activation limit reached: ' .. activateMsg
-        SaveLicenseState()
-      end
-      -- Device activation failure doesn't prevent license from working
-      -- The error is logged but verification still succeeds
-    end
-  end
   
   return true, status
 end
@@ -4603,10 +4508,6 @@ local function DrawLicenseUI(ctx, is_modal)
         
         local removeText = _0x7r8s() .. ' ' .. _0x2e3f() .. ' ' .. _0x8e9f()
         if im.Button(ctx, removeText, btnW, 0) then
-            -- Deactivate device before removing license key
-            if LicenseState.licenseKey and LicenseState.licenseKey ~= '' and LicenseState.deviceId and LicenseState.deviceId ~= '' then
-                DeactivateDevice(LicenseState.licenseKey, LicenseState.deviceId, LicenseState.email)
-            end
             LicenseState.licenseKey = nil
             LicenseState.email = nil
             SetLicenseResult('inactive', nil, 'License key removed', nil)
@@ -4861,22 +4762,47 @@ im.Attach(ctx, Font_Andale_Mono_14_BI)
 im.Attach(ctx, Font_Andale_Mono_15_BI)
 im.Attach(ctx, Font_Andale_Mono_16_BI)
 
+local function FileExists(path)
+  local f = io.open(path, 'rb')
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
+local function IsValidImGuiImage(img)
+  if not img then return false end
+  if r.ValidatePtr2 then
+    return r.ValidatePtr2(0, img, 'ImGui_Image*')
+  end
+  return true
+end
+
+local function SafeCreateImage(path)
+  if not path or path == '' then return nil end
+  if not FileExists(path) then return nil end
+  local img = im.CreateImage(path)
+  if not IsValidImGuiImage(img) then return nil end
+  return img
+end
+
 function attachImages()
   local imageFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP
   Img = {
-    StarHollow = im.CreateImage(imageFolder .. 'starHollow.png'),
-    Star = im.CreateImage(imageFolder .. 'star.png'),
-    Send = im.CreateImage(imageFolder .. 'send.png'),
-    Recv = im.CreateImage(imageFolder .. 'receive.png'),
-    Show = im.CreateImage(imageFolder .. 'show.png'),
-    Hide = im.CreateImage(imageFolder .. 'hide.png'),
-    Link = im.CreateImage(imageFolder .. 'link.png'),
-    Snapshot = im.CreateImage(imageFolder .. 'snapshot.png'),
-    Camera   = im.CreateImage(imageFolder .. 'camera.png'),
-    Folder   = im.CreateImage(imageFolder .. 'folder.png'),
-    FolderOpen = im.CreateImage(imageFolder .. 'folder_open.png'),
-    Settings = im.CreateImage(imageFolder .. 'settings.png'),
-    Update = im.CreateImage(imageFolder .. 'update.png'),
+    StarHollow = SafeCreateImage(imageFolder .. 'starHollow.png'),
+    Star = SafeCreateImage(imageFolder .. 'star.png'),
+    Send = SafeCreateImage(imageFolder .. 'send.png'),
+    Recv = SafeCreateImage(imageFolder .. 'receive.png'),
+    Show = SafeCreateImage(imageFolder .. 'show.png'),
+    Hide = SafeCreateImage(imageFolder .. 'hide.png'),
+    Link = SafeCreateImage(imageFolder .. 'link.png'),
+    Snapshot = SafeCreateImage(imageFolder .. 'snapshot.png'),
+    Camera   = SafeCreateImage(imageFolder .. 'camera.png'),
+    Folder   = SafeCreateImage(imageFolder .. 'folder.png'),
+    FolderOpen = SafeCreateImage(imageFolder .. 'folder_open.png'),
+    Settings = SafeCreateImage(imageFolder .. 'settings.png'),
+    Update = SafeCreateImage(imageFolder .. 'update.png'),
   }
   -- Validate Settings image was created successfully
   if not Img.Settings then
@@ -4886,19 +4812,19 @@ function attachImages()
   -- Optional copy icon (fallback to Link if missing)
   do
     local copyPath = imageFolder .. 'copy.png'
-    Img.Copy = im.CreateImage(copyPath)
+    Img.Copy = SafeCreateImage(copyPath)
     if not Img.Copy then Img.Copy = Img.Link end
   end
   -- Optional search icon (fallback to Settings if missing)
   do
     local searchPath = imageFolder .. 'search.png'
-    Img.Search = im.CreateImage(searchPath)
+    Img.Search = SafeCreateImage(searchPath)
     if not Img.Search then Img.Search = Img.Settings end
   end
   -- Optional trash icon (fallback to Hide if missing)
   do
     local trashPath = imageFolder .. 'trash.png'
-    Img.Trash = im.CreateImage(trashPath)
+    Img.Trash = SafeCreateImage(trashPath)
     if not Img.Trash then Img.Trash = Img.Hide end
   end
   im.Attach(ctx, Img.Star)
@@ -4913,13 +4839,14 @@ function attachImages()
   im.Attach(ctx, Img.Folder)
   im.Attach(ctx, Img.FolderOpen)
   if Img.Settings then im.Attach(ctx, Img.Settings) end
+  if Img.Update then im.Attach(ctx, Img.Update) end
   if Img.Copy then im.Attach(ctx, Img.Copy) end
   if Img.Trash then im.Attach(ctx, Img.Trash) end
   if Img.Search then im.Attach(ctx, Img.Search) end
   local graphPath = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'graph.png'
-  Img.Graph = im.CreateImage(graphPath)
+  Img.Graph = SafeCreateImage(graphPath)
 
-  im.Attach(ctx, Img.Graph)
+  if Img.Graph then im.Attach(ctx, Img.Graph) end
 end
 attachImages()
 
@@ -7709,7 +7636,7 @@ function loop()
       im.PushStyleColor(ctx, im.Col_Button, 0x00000000) -- Transparent base
       im.PushStyleColor(ctx, im.Col_ButtonHovered, 0xffffff11)
       im.PushStyleColor(ctx, im.Col_ButtonActive, 0xffffff08)
-      if Img and Img.Update then
+      if Img and IsValidImGuiImage(Img.Update) then
         -- ImageButton: ctx, id, image, width, height, uv0, uv1, frame_padding, bg_color, tint_color
         if im.ImageButton(ctx, 'update icon', Img.Update, 16, 16, nil, nil, nil, nil, nil, accentColor) then
           -- Open Settings and switch to Updates tab (index 2)
