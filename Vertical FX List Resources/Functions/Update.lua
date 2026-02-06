@@ -286,7 +286,7 @@ end
 
 -- List of files to update (relative to repo root)
 local FILES_TO_UPDATE = {
-    "FXD_Vertical FX list.lua",
+    "[DEV] CRS_Vertical FX list.lua",
     "style_presets_FACTORY.lua",
     "style_presets_USER.lua",
     "fx_favorites.txt",

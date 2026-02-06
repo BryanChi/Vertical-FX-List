@@ -1,8 +1,8 @@
--- @name FXD - Vertical FX List
+-- @name CRS - Vertical FX List
 -- @author Bryan Chi
 -- @about Vertical FX List - A comprehensive vertical FX chain interface for REAPER, visit www.coolreaperscripts.com for details
 -- @provides
---   [main] FXD_Vertical FX list.lua
+--   [main] [DEV] CRS_Vertical FX list.lua
 --   [nomain] style_presets_FACTORY.lua
 --   [nomain] fx_favorites.txt
 --   [nomain] Vertical FX List Resources/**
