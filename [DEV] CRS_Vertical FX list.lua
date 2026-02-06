@@ -14,6 +14,47 @@ package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 im = require 'imgui' '0.9.3'
 OS = r.GetOS()
 
+local hasReaImGui = r.APIExists and r.APIExists("ImGui_GetBuiltinPath")
+if not hasReaImGui then
+  r.ShowMessageBox(
+    "ReaImGui extension not detected.\n\nPlease install it and restart REAPER.",
+    "Vertical FX List - Missing ReaImGui",
+    0
+  )
+  return
+end
+
+package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
+local ok, imgui = pcall(require, 'imgui')
+if not ok or type(imgui) ~= 'function' then
+  r.ShowMessageBox(
+    "ReaImGui could not be loaded.\n\nPlease reinstall it and restart REAPER.",
+    "Vertical FX List - Missing ReaImGui",
+    0
+  )
+  return
+end
+
+local ok_ver, im_ctx = pcall(imgui, '0.9.3')
+if not ok_ver then
+  r.ShowMessageBox(
+    "ReaImGui is installed, but the required version (0.9.3) is not available.\n\nPlease update ReaImGui.",
+    "Vertical FX List - ReaImGui Version",
+    0
+  )
+  return
+end
+im = im_ctx
+local SWS_URL = "https://sws-extension.org"
+local SWS_AVAILABLE = r.APIExists and r.APIExists("BR_Win32_GetPrivateProfileString") or false
+if not SWS_AVAILABLE then
+  r.ShowMessageBox(
+    "SWS extension not detected.\n\nThis script uses SWS functions.\nDownload and install from:\n" .. SWS_URL,
+    "Vertical FX List - Missing SWS",
+    0
+  )
+end
+
 IS_MAC = OS and (OS:find('OSX') or OS:find('macOS'))
 local IS_WINDOWS = OS and OS:find('Win')
 local PATH_SEP = package.config:sub(1,1)  -- Cross-platform path separator
