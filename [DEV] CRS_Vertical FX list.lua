@@ -10,8 +10,6 @@
 --VERSION 1.02
 
 local r = reaper
-package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
-im = require 'imgui' '0.9.3'
 OS = r.GetOS()
 
 local hasReaImGui = r.APIExists and r.APIExists("ImGui_GetBuiltinPath")
@@ -45,14 +43,34 @@ if not ok_ver then
   return
 end
 im = im_ctx
+
+local function OpenUrl(url)
+  if r.CF_ShellExecute then
+    r.CF_ShellExecute(url)
+    return
+  end
+  if r.ExecProcess then
+    if OS and (OS:find('OSX') or OS:find('macOS')) then
+      r.ExecProcess('open "' .. url .. '"', 0)
+    elseif OS and OS:find('Win') then
+      r.ExecProcess('cmd.exe /c start "" "' .. url .. '"', 0)
+    else
+      r.ExecProcess('xdg-open "' .. url .. '"', 0)
+    end
+  end
+end
+
 local SWS_URL = "https://sws-extension.org"
 local SWS_AVAILABLE = r.APIExists and r.APIExists("BR_Win32_GetPrivateProfileString") or false
 if not SWS_AVAILABLE then
-  r.ShowMessageBox(
-    "SWS extension not detected.\n\nThis script uses SWS functions.\nDownload and install from:\n" .. SWS_URL,
+  local rv = r.ShowMessageBox(
+    "SWS extension not detected.\n\nThis script uses SWS functions.\nOpen the download page?",
     "Vertical FX List - Missing SWS",
-    0
+    4
   )
+  if rv == 6 then
+    OpenUrl(SWS_URL)
+  end
 end
 
 IS_MAC = OS and (OS:find('OSX') or OS:find('macOS'))
@@ -64,16 +82,6 @@ _script_path = script_path
 local FunctionFolder = script_path .. 'Vertical FX List Resources' .. PATH_SEP .. 'Functions' .. PATH_SEP
 
 dofile(FunctionFolder .. 'General Functions.Lua')
-
-local SWS_URL = "https://sws-extension.org"
-local SWS_AVAILABLE = r.APIExists and r.APIExists("BR_Win32_GetPrivateProfileString") or false
-if not SWS_AVAILABLE then
-  r.ShowMessageBox(
-    "SWS extension not detected.\n\nThis script uses SWS functions (e.g. BR_*).\nDownload and install from:\n" .. SWS_URL,
-    "Vertical FX List - Missing SWS",
-    0
-  )
-end
 
 --[[ arrange_hwnd  = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 0x3E8) -- client position
 
@@ -171,6 +179,14 @@ local function ShowLink(ctx, url, linkText)
     -- Show hand cursor on hover for better UX
     im.SetMouseCursor(ctx, im.MouseCursor_Hand)
   end
+end
+
+local function SafeBegin(ctx, name, open, flags)
+  local ok, visible, newOpen = pcall(im.Begin, ctx, name, open, flags)
+  if not ok then
+    return false, open, false
+  end
+  return visible, newOpen, true
 end
 
 -- Helper: find the first selected FX across all tracks (for menu positioning)
@@ -4324,6 +4340,60 @@ local function getTrackPosAndHeight(track)
   end
 end -- getTrackPosAndHeight()
 
+local function getTopArrangePosition(ctx)
+  local topArrang = nil
+  
+  -- Try BR_ method first
+  topArrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file())))
+  
+  -- Fallback method if BR_ returns nil
+  -- Top_Arrang should be the distance from ImGui window top to where I_TCPY=0 (where TCP scrollable area starts, BELOW the ruler)
+  if not topArrang and ctx then
+    local trackCount = r.GetNumTracks()
+    
+    if trackCount > 0 then
+      -- Find any visible track to calculate from
+      local firstTrack = r.GetTrack(0, 0)
+      if firstTrack then
+        -- Get track's absolute screen Y position
+        local track_screen_y = r.GetMediaTrackInfo_Value(firstTrack, "I_TCPSCREENY")
+        -- Get track's relative position within TCP (below ruler)
+        local track_tcpy = r.GetMediaTrackInfo_Value(firstTrack, "I_TCPY")
+        
+        if track_screen_y and track_tcpy then
+          -- Calculate where TCP scrollable area starts (where I_TCPY = 0)
+          -- If track is at I_TCPY=50 and screen Y=200, then I_TCPY=0 is at screen Y=150
+          local tcp_scroll_start_screen_y = track_screen_y - track_tcpy
+          
+          -- Get ImGui window's screen position
+          local imgui_win_x, imgui_win_y = im.GetWindowPos(ctx)
+          local viewport = im.GetWindowViewport(ctx)
+          local viewport_x, viewport_y = 0, 0
+          if viewport then
+            viewport_x, viewport_y = im.Viewport_GetPos(viewport)
+          end
+          local imgui_screen_y = imgui_win_y + viewport_y
+          
+          -- Top_Arrang = distance from ImGui window to where tracks start
+          topArrang = tcp_scroll_start_screen_y - imgui_screen_y
+          
+          -- Debug output (only print occasionally to avoid spam)
+          if math.random() < 0.01 then  -- Print ~1% of frames
+            r.ShowConsoleMsg(string.format("\nDEBUG Fallback (Track-based calculation):\n"))
+            r.ShowConsoleMsg(string.format("  Track screen Y: %.1f, I_TCPY: %.1f\n", track_screen_y, track_tcpy))
+            r.ShowConsoleMsg(string.format("  TCP scroll area starts at screen Y: %.1f\n", tcp_scroll_start_screen_y))
+            r.ShowConsoleMsg(string.format("  ImGui screen Y: %.1f\n", imgui_screen_y))
+            r.ShowConsoleMsg(string.format("  ==> Top_Arrang: %.1f\n\n", topArrang))
+          end
+        end
+      end
+    end
+  end
+  
+  -- Final fallback
+  return topArrang or 50
+end
+
 function DB2VAL(x) return math.exp((x) * 0.11512925464970228420089957273422) end
 
 function VAL2DB(x)
@@ -7526,9 +7596,10 @@ function loop()
   -- advance patch-line animation phase each frame
   PatchLineShift = (PatchLineShift + PatchLineSpeed) % (Patch_Thick * 2)
 
-  Top_Arrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file()))) 
-  Top_Arrang = Top_Arrang or 0
+  Top_Arrang = getTopArrangePosition(ctx)
 
+
+  
 
   -- Calculate DPI scale for Windows track coordinate alignment fix
   -- Calculate only once (first loop) - DPI_SCALE is cached globally
@@ -7733,19 +7804,33 @@ function loop()
   
   if OPEN.MonitorFX then
     im.PushStyleVar(ctx, im.StyleVar_WindowRounding, 5)
-    MonitorFX_Visible, OPEN.MonitorFX = im.Begin(ctx, 'Monitor FX###MonitorFXWindow', OPEN.MonitorFX, im.WindowFlags_NoScrollbar)
+    local beginOk
+    MonitorFX_Visible, OPEN.MonitorFX, beginOk = SafeBegin(ctx, 'Monitor FX###MonitorFXWindow', OPEN.MonitorFX, im.WindowFlags_NoScrollbar)
     im.PopStyleVar(ctx)
     
-    -- Save state if close button was clicked
-    if prevMonitorFX ~= (OPEN.MonitorFX and true or false) then
-      SaveOpenState()
-    end
+    if beginOk then
+      -- Save state if close button was clicked
+      if prevMonitorFX ~= (OPEN.MonitorFX and true or false) then
+        SaveOpenState()
+      end
 
-    if MonitorFX_Visible then 
-      MonitorFX_Height = MonitorFXs(ctx, 0)
+      if MonitorFX_Visible then
+        local ok_mfx, height = pcall(MonitorFXs, ctx, 0)
+        if ok_mfx then
+          MonitorFX_Height = height or 0
+        else
+          -- Disable the window for this session if it errors to keep ImGui stack sane
+          MonitorFX_Visible = false
+          MonitorFX_Height = 0
+          OPEN.MonitorFX = false
+        end
+      end
+      -- ImGui requires End even when not visible
+      im.End(ctx)
+    else
+      MonitorFX_Visible = false
+      MonitorFX_Height = 0
     end
-    -- ImGui requires End even when not visible
-    im.End(ctx)
   else
     MonitorFX_Visible = false
     MonitorFX_Height = 0
@@ -7765,14 +7850,16 @@ function loop()
     im.PushStyleVar(ctx, im.StyleVar_WindowRounding, 8) -- Rounded corners
     im.PushStyleVar(ctx, im.StyleVar_WindowPadding, 12, 12) -- Comfortable padding
 
-    Hints_Visible, OPEN.Hints = im.Begin(ctx, 'Hints   ', OPEN.Hints, im.WindowFlags_NoScrollbar)
+    local beginOk
+    Hints_Visible, OPEN.Hints, beginOk = SafeBegin(ctx, 'Hints   ', OPEN.Hints, im.WindowFlags_NoScrollbar)
     
-    -- Save state if close button was clicked
-    if prevHints ~= (OPEN.Hints and true or false) then
-      SaveOpenState()
-    end
+    if beginOk then
+      -- Save state if close button was clicked
+      if prevHints ~= (OPEN.Hints and true or false) then
+        SaveOpenState()
+      end
 
-    if Hints_Visible then
+      if Hints_Visible then
       im.PushFont(ctx, Font_Andale_Mono_10)
       im.PushStyleVar(ctx, im.StyleVar_ItemSpacing, 0, 0) -- Reduce vertical spacing
       if HelpHint and #HelpHint > 0 then
@@ -8025,12 +8112,17 @@ function loop()
     else
       Hints_Win_Y = nil
     end
+      else
+        Hints_Win_Y = nil
+      end
+
+      -- ImGui requires End even when not visible
+      im.End(ctx)
     else
+      Hints_Visible = false
+      Hints_Height = 0
       Hints_Win_Y = nil
     end
-
-    -- ImGui requires End even when not visible
-    im.End(ctx)
 
     im.PopStyleColor(ctx, 2)
     im.PopStyleVar(ctx, 2)
