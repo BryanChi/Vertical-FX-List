@@ -414,9 +414,12 @@ function PerformUpdate()
         local encoded_path = URLEncode(file_path)
         local full_url = repo_base .. "/" .. encoded_path
         
-        -- Build local path
-        local local_path = _script_path .. file_path:gsub("/", sep)
-        
+             -- Build local path - rename [DEV] file to remove [DEV] prefix
+        local local_filename = file_path
+        if file_path == "[DEV] CRS_Vertical FX list.lua" then
+            local_filename = "CRS_vertical fx list.lua"
+        end
+        local local_path = _script_path .. local_filename:gsub("/", sep)
         -- Download file
         local success, error_msg = DownloadFileToDisk(full_url, local_path)
         if success then
