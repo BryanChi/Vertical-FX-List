@@ -615,13 +615,8 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                 local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFXIdxNum)
                 FX = FX or {}
                 FX[ID] = FX[ID] or {}
-                -- Check if FX is already linked, collect all linked FXs
-                if CollectLinkedFXs and FX[ID].Link then
-                  local linkedGroup = CollectLinkedFXs(ID)
-                  NeedLinkFXsGUIDs = linkedGroup
-                else
-                  NeedLinkFXsID = ID
-                end
+                NeedLinkFXsGUIDs = nil
+                NeedLinkFXsID = ID
               end
               -- Restore container's parallel state after drop to preserve relationships
               if containerParVal > 0 then
@@ -2544,13 +2539,8 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
             end
             local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
             FX[ID] = FX[ID] or {}
-            -- Check if FX is already linked, collect all linked FXs
-            if CollectLinkedFXs and FX[ID].Link then
-              local linkedGroup = CollectLinkedFXs(ID)
-              NeedLinkFXsGUIDs = linkedGroup
-            else
-              NeedLinkFXsID = ID
-            end
+            NeedLinkFXsGUIDs = nil
+            NeedLinkFXsID = ID
           end
           
           -- Restore container's parallel state after drop to preserve parallel container relationships
@@ -2587,16 +2577,11 @@ function FXBtns(Track, BtnSz, container, TrackTB, ctx, inheritedAlpha, OPEN)
                   FX[guid] = FX[guid] or {}
                 end
               else
-                -- Single FX: check if already linked
+                -- Single FX: store source GUID; link group expansion is resolved during copy processing
                 local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
                 FX[ID] = FX[ID] or {}
-                -- Check if FX is already linked, collect all linked FXs
-                if CollectLinkedFXs and FX[ID].Link then
-                  local linkedGroup = CollectLinkedFXs(ID)
-                  NeedLinkFXsGUIDs = linkedGroup
-                else
-                  NeedLinkFXsID = ID
-                end
+                NeedLinkFXsGUIDs = nil
+                NeedLinkFXsID = ID
               end
             end
           end
@@ -3270,13 +3255,8 @@ function Empty_FX_Space_Btn(ctx, T)
           local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
           FX = FX or {}
           FX[ID] = FX[ID] or {}
-          -- Check if FX is already linked, collect all linked FXs
-          if CollectLinkedFXs and FX[ID].Link then
-            local linkedGroup = CollectLinkedFXs(ID)
-            NeedLinkFXsGUIDs = linkedGroup
-          else
-            NeedLinkFXsID = ID
-          end
+          NeedLinkFXsGUIDs = nil
+          NeedLinkFXsID = ID
         end
       else
         local isCopyMod = (OS and OS:match('Win') and Mods == Ctrl) or (not (OS and OS:match('Win')) and (Mods == Super or Mods == Ctrl))
@@ -3297,17 +3277,12 @@ function Empty_FX_Space_Btn(ctx, T)
                 FX[guid] = FX[guid] or {}
               end
             else
-              -- Single FX: check if already linked
+              -- Single FX: store source GUID; link group expansion is resolved during copy processing
               local ID = r.TrackFX_GetFXGUID(DraggingTrack_Data, draggedFX)
               FX = FX or {}
               FX[ID] = FX[ID] or {}
-              -- Check if FX is already linked, collect all linked FXs
-              if CollectLinkedFXs and FX[ID].Link then
-                local linkedGroup = CollectLinkedFXs(ID)
-                NeedLinkFXsGUIDs = linkedGroup
-              else
-                NeedLinkFXsID = ID
-              end
+              NeedLinkFXsGUIDs = nil
+              NeedLinkFXsID = ID
             end
           end
         end

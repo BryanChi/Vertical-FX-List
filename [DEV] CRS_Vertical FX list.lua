@@ -1869,31 +1869,25 @@ function CollectLinkedFXs(startGUID)
   if not startGUID or not FX[startGUID] then
     return {} -- Return empty table if FX doesn't exist
   end
-  if not FX[startGUID].Link then
-    return {[startGUID] = true} -- Return just the starting FX if not linked
-  end
-  
+
   local linkedGroup = {}
   local visited = {}
-  local toVisit = {startGUID}
-  
-  -- Breadth-first traversal to find all linked FXs
+  local toVisit = { startGUID }
+
+  -- Breadth-first traversal: follow each FX's Link and any FXs that link here (star or chain)
   while #toVisit > 0 do
     local currentGUID = table.remove(toVisit, 1)
     if not visited[currentGUID] then
       visited[currentGUID] = true
       linkedGroup[currentGUID] = true
-      
-      -- Check if this FX has a link
+
       if FX[currentGUID] and FX[currentGUID].Link then
         local linkedGUID = FX[currentGUID].Link
         if not visited[linkedGUID] then
           table.insert(toVisit, linkedGUID)
         end
       end
-      
-      -- Also check reverse links (FXs that link to this one)
-      -- We need to scan all FXs to find ones that link to currentGUID
+
       for guid, fxData in pairs(FX) do
         if fxData and fxData.Link == currentGUID and not visited[guid] then
           table.insert(toVisit, guid)
@@ -1901,7 +1895,7 @@ function CollectLinkedFXs(startGUID)
       end
     end
   end
-  
+
   return linkedGroup
 end
 
@@ -9658,20 +9652,24 @@ function loop()
   rv, tracknumber, fxnumber, paramnumber = r.GetLastTouchedFX()
 
   -- if there's a focused fx
-  if tracknumber and fxnumber  then
+  if tracknumber and fxnumber then
     local trk = r.GetTrack(0, math.max(tracknumber - 1, 0))
-    if trk then 
+    if trk then
       local FxID = r.TrackFX_GetFXGUID(trk, fxnumber)
-      if FxID then 
+      if FxID then
         FX[FxID] = FX[FxID] or {}
-        if FxID and FX[FxID].Link then
-          Sync = FindFXFromFxGUID(FX[FxID].Link)
-
-          local PrmV = r.TrackFX_GetParamNormalized(trk, fxnumber, paramnumber)
-
-          if Sync then
-            for i, v in ipairs(Sync.fx) do
-              r.TrackFX_SetParamNormalized(Sync.trk[i], v, paramnumber, PrmV)
+        local linkGroup = CollectLinkedFXs(FxID)
+        local PrmV
+        for peerGUID in pairs(linkGroup) do
+          if peerGUID ~= FxID then
+            if PrmV == nil then
+              PrmV = r.TrackFX_GetParamNormalized(trk, fxnumber, paramnumber)
+            end
+            local peerOut = FindFXFromFxGUID(peerGUID)
+            if peerOut and peerOut.fx then
+              for i, v in ipairs(peerOut.fx) do
+                r.TrackFX_SetParamNormalized(peerOut.trk[i], v, paramnumber, PrmV)
+              end
             end
           end
         end
