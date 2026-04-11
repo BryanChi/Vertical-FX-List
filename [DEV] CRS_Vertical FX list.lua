@@ -4234,6 +4234,7 @@ SendClr1, SendClr2 = Generate_Active_And_Hvr_CLRs(SendClr)
 
 
 TRK_H_DIVIDER = 1  -- Default for macOS (no scaling)
+TOP_ARRANGE_Y_NUDGE = 10
 -- Windows: Will be set to DPI scale after detection in main loop
 -- Apply divider only on Windows; macOS should stay unscaled
 function ApplyTrackHeightDivider(value)
@@ -4336,56 +4337,74 @@ end -- getTrackPosAndHeight()
 
 local function getTopArrangePosition(ctx)
   local topArrang = nil
-  
-  -- Try BR_ method first
-  topArrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file())))
-  
-  -- Fallback method if BR_ returns nil
-  -- Top_Arrang should be the distance from ImGui window top to where I_TCPY=0 (where TCP scrollable area starts, BELOW the ruler)
-  if not topArrang and ctx then
+
+  -- macOS: convert the arrange client origin from native coordinates into
+  -- ReaImGui coordinates so both points are measured in the same space.
+  if IS_MAC then
+    local mainHwnd = r.GetMainHwnd()
+    local arrangeHwnd = mainHwnd and r.JS_Window_FindChildByID(mainHwnd, 0x3E8)
+    if arrangeHwnd and ctx then
+      local arrange_screen_x, arrange_screen_y = r.JS_Window_ClientToScreen(arrangeHwnd, 0, 0)
+      local _, arrange_imgui_y = im.PointConvertNative(ctx, arrange_screen_x, arrange_screen_y, false)
+      local _, imgui_win_y = im.GetWindowPos(ctx)
+      topArrang = arrange_imgui_y - imgui_win_y
+    end
+
+    -- Fallback to INI pane offset on macOS.
+    if not topArrang then
+      topArrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file())))
+    end
+    if topArrang then
+      return topArrang + (TOP_ARRANGE_Y_NUDGE or 0)
+    end
+  end
+
+  -- Prefer dynamic track-based calculation:
+  -- I_TCPSCREENY - I_TCPY gives the screen Y where TCPY==0, i.e. below the ruler.
+  if ctx then
     local trackCount = r.GetNumTracks()
-    
-    if trackCount > 0 then
-      -- Find any visible track to calculate from
-      local firstTrack = r.GetTrack(0, 0)
-      if firstTrack then
-        -- Get track's absolute screen Y position
-        local track_screen_y = r.GetMediaTrackInfo_Value(firstTrack, "I_TCPSCREENY")
-        -- Get track's relative position within TCP (below ruler)
-        local track_tcpy = r.GetMediaTrackInfo_Value(firstTrack, "I_TCPY")
-        
-        if track_screen_y and track_tcpy then
-          -- Calculate where TCP scrollable area starts (where I_TCPY = 0)
-          -- If track is at I_TCPY=50 and screen Y=200, then I_TCPY=0 is at screen Y=150
-          local tcp_scroll_start_screen_y = track_screen_y - track_tcpy
-          
-          -- Get ImGui window's screen position
-          local imgui_win_x, imgui_win_y = im.GetWindowPos(ctx)
-          local viewport = im.GetWindowViewport(ctx)
-          local viewport_x, viewport_y = 0, 0
-          if viewport then
-            viewport_x, viewport_y = im.Viewport_GetPos(viewport)
-          end
-          local imgui_screen_y = imgui_win_y + viewport_y
-          
-          -- Top_Arrang = distance from ImGui window to where tracks start
-          topArrang = tcp_scroll_start_screen_y - imgui_screen_y
-          
-          -- Debug output (only print occasionally to avoid spam)
-          if math.random() < 0.01 then  -- Print ~1% of frames
-            r.ShowConsoleMsg(string.format("\nDEBUG Fallback (Track-based calculation):\n"))
-            r.ShowConsoleMsg(string.format("  Track screen Y: %.1f, I_TCPY: %.1f\n", track_screen_y, track_tcpy))
-            r.ShowConsoleMsg(string.format("  TCP scroll area starts at screen Y: %.1f\n", tcp_scroll_start_screen_y))
-            r.ShowConsoleMsg(string.format("  ImGui screen Y: %.1f\n", imgui_screen_y))
-            r.ShowConsoleMsg(string.format("  ==> Top_Arrang: %.1f\n\n", topArrang))
-          end
+    local refTrack = nil
+
+    -- Use first visible TCP track so hidden tracks don't skew the measurement.
+    for i = 0, trackCount - 1 do
+      local tr = r.GetTrack(0, i)
+      if tr and r.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") == 1 then
+        refTrack = tr
+        break
+      end
+    end
+
+    -- Fallback to first track if none are visible.
+    if not refTrack and trackCount > 0 then
+      refTrack = r.GetTrack(0, 0)
+    end
+
+    if refTrack then
+      local track_screen_y = r.GetMediaTrackInfo_Value(refTrack, "I_TCPSCREENY")
+      local track_tcpy = r.GetMediaTrackInfo_Value(refTrack, "I_TCPY")
+
+      if track_screen_y and track_tcpy then
+        local tcp_scroll_start_screen_y = track_screen_y - track_tcpy
+
+        local _, imgui_win_y = im.GetWindowPos(ctx)
+        local viewport = im.GetWindowViewport(ctx)
+        local _, viewport_y = 0, 0
+        if viewport then
+          _, viewport_y = im.Viewport_GetPos(viewport)
         end
+        local imgui_screen_y = imgui_win_y + viewport_y
+        topArrang = tcp_scroll_start_screen_y - imgui_screen_y
       end
     end
   end
-  
+
+  -- Fallback to INI key if dynamic measurement is unavailable.
+  if not topArrang then
+    topArrang = tonumber(select(2, r.BR_Win32_GetPrivateProfileString("REAPER", "toppane", "", r.get_ini_file())))
+  end
+
   -- Final fallback
-  return topArrang or 50
+  return (topArrang or 50) + (TOP_ARRANGE_Y_NUDGE or 0)
 end
 
 function DB2VAL(x) return math.exp((x) * 0.11512925464970228420089957273422) end
